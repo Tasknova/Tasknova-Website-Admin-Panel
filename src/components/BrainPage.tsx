@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { 
   prepareCompanyInfoForEmbedding, 
@@ -16,6 +16,7 @@ export default function BrainPage({ onBack }: BrainPageProps) {
   const [activeTab, setActiveTab] = useState<'info' | 'documents' | 'search'>('info');
   const [loading, setLoading] = useState(false);
   const [userId, setUserId] = useState<string>('');
+  const chatEndRef = useRef<HTMLDivElement>(null);
   
   // Company Brain State
   const [companyBrain, setCompanyBrain] = useState<Partial<CompanyBrain>>({
@@ -44,15 +45,33 @@ export default function BrainPage({ onBack }: BrainPageProps) {
   const [documents, setDocuments] = useState<BrainDocument[]>([]);
   const [groups, setGroups] = useState<DocumentGroup[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [uploadMetadata, setUploadMetadata] = useState({
+    title: '',
+    description: '',
+    category: '',
+    tags: ''
+  });
   
   // Search State
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [chatMessages, setChatMessages] = useState<Array<{
+    role: 'user' | 'assistant';
+    content: string;
+    sources?: any[];
+    timestamp: Date;
+  }>>([]);
   const [searching, setSearching] = useState(false);
 
   useEffect(() => {
     initializeUser();
   }, []);
+
+  useEffect(() => {
+    // Auto-scroll to bottom when new messages arrive
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
 
   async function initializeUser() {
     try {
@@ -156,13 +175,39 @@ export default function BrainPage({ onBack }: BrainPageProps) {
     }
   }
 
-  async function handleFileUpload(event: React.ChangeEvent<HTMLInputElement>) {
+  async function handleFileSelect(event: React.ChangeEvent<HTMLInputElement>) {
     const files = event.target.files;
-    if (!files || !userId) return;
+    if (!files || files.length === 0) return;
+
+    const fileArray = Array.from(files);
+    setSelectedFiles(fileArray);
+    
+    // Set default title from first file name
+    if (fileArray.length === 1) {
+      setUploadMetadata(prev => ({
+        ...prev,
+        title: fileArray[0].name.replace(/\.[^/.]+$/, '') // Remove extension
+      }));
+    } else {
+      setUploadMetadata(prev => ({
+        ...prev,
+        title: `${fileArray.length} files`
+      }));
+    }
+    
+    setShowUploadModal(true);
+    // Reset file input
+    event.target.value = '';
+  }
+
+  async function handleUploadWithMetadata() {
+    if (!selectedFiles.length || !userId) return;
 
     setUploading(true);
     try {
-      for (const file of Array.from(files)) {
+      const uploadedDocs = [];
+      
+      for (const file of selectedFiles) {
         // Upload to Supabase Storage
         const fileName = `${Date.now()}_${file.name}`;
         const { data: uploadData, error: uploadError } = await supabase.storage
@@ -184,17 +229,26 @@ export default function BrainPage({ onBack }: BrainPageProps) {
         else if (file.type.includes('audio')) fileType = 'audio';
         else if (file.type.includes('document') || file.type.includes('text')) fileType = 'document';
 
+        // Parse tags
+        const tags = uploadMetadata.tags
+          .split(',')
+          .map(t => t.trim())
+          .filter(Boolean);
+
         // Insert document record
         const { data: docData, error: docError } = await supabase
           .from('brain_documents')
           .insert({
             user_id: userId,
-            file_name: file.name,
+            file_name: selectedFiles.length === 1 ? uploadMetadata.title || file.name : file.name,
             file_type: fileType,
             file_size: file.size,
             mime_type: file.type,
             storage_path: uploadData.path,
             storage_url: urlData.publicUrl,
+            description: uploadMetadata.description || null,
+            category: uploadMetadata.category || null,
+            tags: tags.length > 0 ? tags : null,
             status: 'uploaded'
           })
           .select()
@@ -203,53 +257,112 @@ export default function BrainPage({ onBack }: BrainPageProps) {
         if (docError) throw docError;
 
         // Generate embedding for document
-        const content = `File: ${file.name}\nType: ${fileType}`;
-        const embeddingResult = await import('@/lib/embeddings').then(m => m.generateEmbedding(content));
+        const embeddingContent = [
+          `File: ${docData.file_name}`,
+          uploadMetadata.description ? `Description: ${uploadMetadata.description}` : '',
+          uploadMetadata.category ? `Category: ${uploadMetadata.category}` : '',
+          tags.length ? `Tags: ${tags.join(', ')}` : '',
+          `Type: ${fileType}`
+        ].filter(Boolean).join('\n');
         
-        if (!embeddingResult.error) {
+        const { generateEmbedding } = await import('@/lib/embeddings');
+        const embeddingResult = await generateEmbedding(embeddingContent);
+        
+        if (!embeddingResult.error && embeddingResult.embedding.length > 0) {
+          // Convert embedding array to string for pgvector
+          const embeddingStr = `[${embeddingResult.embedding.join(',')}]`;
+          
           await supabase
             .from('company_brain_embeddings')
             .insert({
               user_id: userId,
               content_type: 'document',
               content_id: docData.id,
-              content: content,
-              embedding: embeddingResult.embedding,
+              content: embeddingContent,
+              embedding: embeddingStr,
               metadata: {
-                file_name: file.name,
-                file_type: fileType
+                file_name: docData.file_name,
+                file_type: fileType,
+                category: uploadMetadata.category,
+                tags: tags
               }
             });
         }
+
+        uploadedDocs.push(docData);
       }
 
-      alert('Files uploaded successfully!');
+      alert(`✓ Successfully uploaded ${uploadedDocs.length} document${uploadedDocs.length > 1 ? 's' : ''}!`);
       await loadDocuments(userId);
+      
+      // Reset modal
+      setShowUploadModal(false);
+      setSelectedFiles([]);
+      setUploadMetadata({ title: '', description: '', category: '', tags: '' });
     } catch (error) {
       console.error('Error uploading files:', error);
-      alert('Error uploading files');
+      alert(`✗ Error uploading files: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setUploading(false);
     }
   }
 
+  function cancelUpload() {
+    setShowUploadModal(false);
+    setSelectedFiles([]);
+    setUploadMetadata({ title: '', description: '', category: '', tags: '' });
+  }
+
   async function handleSearch() {
     if (!searchQuery || !userId) return;
 
+    // Add user message to chat
+    const userMessage = {
+      role: 'user' as const,
+      content: searchQuery,
+      timestamp: new Date()
+    };
+    setChatMessages(prev => [...prev, userMessage]);
+
+    const currentQuery = searchQuery;
+    setSearchQuery(''); // Clear input
     setSearching(true);
+
     try {
-      const results = await searchSimilarContent(
+      // Step 1: Search for relevant context using embeddings
+      const context = await searchSimilarContent(
         supabase,
         userId,
-        searchQuery,
-        0.75, // Lower threshold for more results
-        10
+        currentQuery,
+        0.7, // Lower threshold for more context
+        5 // Get top 5 results
       );
 
-      setSearchResults(results);
+      // Step 2: Generate AI response using RAG
+      const { generateChatResponse } = await import('@/lib/embeddings');
+      const { answer, sources, error } = await generateChatResponse(currentQuery, context);
+
+      if (error) {
+        throw new Error(error);
+      }
+
+      // Add assistant message to chat
+      const assistantMessage = {
+        role: 'assistant' as const,
+        content: answer,
+        sources: sources,
+        timestamp: new Date()
+      };
+      setChatMessages(prev => [...prev, assistantMessage]);
+
     } catch (error) {
-      console.error('Error searching:', error);
-      alert('Error performing search');
+      console.error('Error in chat:', error);
+      const errorMessage = {
+        role: 'assistant' as const,
+        content: 'Sorry, I encountered an error while processing your question. Please try again.',
+        timestamp: new Date()
+      };
+      setChatMessages(prev => [...prev, errorMessage]);
     } finally {
       setSearching(false);
     }
@@ -286,7 +399,7 @@ export default function BrainPage({ onBack }: BrainPageProps) {
               {[
                 { id: 'info' as const, label: 'Company Info' },
                 { id: 'documents' as const, label: 'Documents' },
-                { id: 'search' as const, label: 'Search' }
+                { id: 'search' as const, label: '🤖 AI Chat' }
               ].map(tab => (
                 <button
                   key={tab.id}
@@ -576,20 +689,22 @@ export default function BrainPage({ onBack }: BrainPageProps) {
                   <input
                     type="file"
                     multiple
-                    onChange={handleFileUpload}
+                    onChange={handleFileSelect}
                     className="hidden"
                     id="file-upload"
                     disabled={uploading}
                   />
                   <label
                     htmlFor="file-upload"
-                    className="cursor-pointer text-blue-600 hover:text-blue-700"
+                    className="cursor-pointer"
                   >
-                    {uploading ? 'Uploading...' : 'Click to upload documents'}
+                    <div className="text-blue-600 hover:text-blue-700 font-medium">
+                      {uploading ? 'Uploading...' : '📁 Click to select documents'}
+                    </div>
+                    <p className="text-sm text-gray-500 mt-2">
+                      PDF, images, documents, videos, audio files accepted
+                    </p>
                   </label>
-                  <p className="text-sm text-gray-500 mt-2">
-                    PDF, images, documents, videos, audio files accepted
-                  </p>
                 </div>
 
                 <div className="space-y-4">
@@ -604,27 +719,33 @@ export default function BrainPage({ onBack }: BrainPageProps) {
                       {documents.map(doc => (
                         <div
                           key={doc.id}
-                          className="border border-gray-200 rounded-lg p-4 hover:border-blue-300"
+                          className="border border-gray-200 rounded-lg p-4 hover:border-blue-300 transition-colors"
                         >
                           <div className="flex items-start justify-between">
                             <div className="flex-1">
                               <h4 className="font-medium text-gray-900">{doc.file_name}</h4>
                               <div className="flex items-center gap-4 mt-2 text-sm text-gray-500">
-                                <span className="px-2 py-1 bg-gray-100 rounded">{doc.file_type}</span>
-                                <span>{(doc.file_size || 0 / 1024).toFixed(2)} KB</span>
-                                <span>{doc.status}</span>
+                                <span className="px-2 py-1 bg-gray-100 rounded uppercase text-xs font-medium">
+                                  {doc.file_type}
+                                </span>
+                                <span>{((doc.file_size || 0) / 1024).toFixed(2)} KB</span>
+                                {doc.category && (
+                                  <span className="px-2 py-1 bg-blue-50 text-blue-700 rounded text-xs">
+                                    {doc.category}
+                                  </span>
+                                )}
                               </div>
                               {doc.description && (
                                 <p className="text-sm text-gray-600 mt-2">{doc.description}</p>
                               )}
                               {doc.tags && doc.tags.length > 0 && (
-                                <div className="flex gap-2 mt-2">
+                                <div className="flex gap-2 mt-2 flex-wrap">
                                   {doc.tags.map((tag, idx) => (
                                     <span
                                       key={idx}
                                       className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded"
                                     >
-                                      {tag}
+                                      #{tag}
                                     </span>
                                   ))}
                                 </div>
@@ -635,7 +756,7 @@ export default function BrainPage({ onBack }: BrainPageProps) {
                                 href={doc.storage_url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="text-blue-600 hover:text-blue-700 text-sm"
+                                className="ml-4 px-3 py-1 text-blue-600 hover:text-blue-700 text-sm border border-blue-300 rounded hover:bg-blue-50 transition-colors"
                               >
                                 View
                               </a>
@@ -649,74 +770,276 @@ export default function BrainPage({ onBack }: BrainPageProps) {
               </div>
             )}
 
-            {/* Search Tab */}
+            {/* Search Tab - AI Chat */}
             {activeTab === 'search' && (
-              <div className="space-y-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Search Query
-                  </label>
+              <div className="flex flex-col h-[600px]">
+                {/* Header */}
+                <div className="mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900">🤖 AI Assistant</h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Ask questions about your company and I'll answer using your knowledge base
+                  </p>
+                </div>
+
+                {/* Chat Messages */}
+                <div className="flex-1 overflow-y-auto space-y-4 mb-4 p-4 bg-gray-50 rounded-lg">
+                  {chatMessages.length === 0 ? (
+                    <div className="flex items-center justify-center h-full">
+                      <div className="text-center text-gray-400">
+                        <svg className="w-16 h-16 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                        </svg>
+                        <p className="text-sm">Start a conversation by asking a question</p>
+                        <p className="text-xs mt-2">Example: "What is our mission statement?"</p>
+                      </div>
+                    </div>
+                  ) : (
+                    chatMessages.map((message, idx) => (
+                      <div
+                        key={idx}
+                        className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                      >
+                        <div className={`max-w-[80%] ${message.role === 'user' ? 'order-2' : 'order-1'}`}>
+                          {/* Message Bubble */}
+                          <div
+                            className={`rounded-lg px-4 py-3 ${
+                              message.role === 'user'
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-white border border-gray-200 text-gray-900'
+                            }`}
+                          >
+                            <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                            <p className={`text-xs mt-1 ${
+                              message.role === 'user' ? 'text-blue-100' : 'text-gray-400'
+                            }`}>
+                              {message.timestamp.toLocaleTimeString()}
+                            </p>
+                          </div>
+
+                          {/* Sources Section (only for assistant messages) */}
+                          {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
+                            <details className="mt-2 bg-gray-100 rounded-lg overflow-hidden">
+                              <summary className="cursor-pointer px-4 py-2 text-xs font-medium text-gray-700 hover:bg-gray-200 transition-colors">
+                                📚 View {message.sources.length} source{message.sources.length > 1 ? 's' : ''}
+                              </summary>
+                              <div className="p-3 space-y-2 border-t border-gray-200">
+                                {message.sources.map((source, srcIdx) => (
+                                  <div
+                                    key={srcIdx}
+                                    className="bg-white rounded p-3 border border-gray-200"
+                                  >
+                                    <div className="flex items-start justify-between mb-2">
+                                      <span className="px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded font-medium">
+                                        {source.content_type}
+                                      </span>
+                                      <span className="text-xs font-medium text-green-600">
+                                        {(source.similarity * 100).toFixed(0)}% match
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-gray-700 leading-relaxed">
+                                      {source.content}
+                                    </p>
+                                    {source.metadata && (
+                                      <div className="mt-2 flex flex-wrap gap-1">
+                                        {source.metadata.file_name && (
+                                          <span className="text-xs bg-gray-100 px-2 py-1 rounded">
+                                            📄 {source.metadata.file_name}
+                                          </span>
+                                        )}
+                                        {source.metadata.category && (
+                                          <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded">
+                                            {source.metadata.category}
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </details>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+
+                  {/* Loading Indicator */}
+                  {searching && (
+                    <div className="flex justify-start">
+                      <div className="bg-white border border-gray-200 rounded-lg px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className="flex gap-1">
+                            <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                            <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                            <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                          </div>
+                          <span className="text-xs text-gray-500">Thinking...</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Scroll anchor */}
+                  <div ref={chatEndRef} />
+                </div>
+
+                {/* Input Area */}
+                <div className="border-t border-gray-200 pt-4">
                   <div className="flex gap-2">
                     <input
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                      placeholder="What is our mission statement?"
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-md"
+                      onKeyDown={(e) => e.key === 'Enter' && !searching && searchQuery && handleSearch()}
+                      placeholder="Ask me anything about your company..."
+                      disabled={searching}
+                      className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
                     />
                     <button
                       onClick={handleSearch}
                       disabled={searching || !searchQuery}
-                      className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+                      className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
                     >
-                      {searching ? 'Searching...' : 'Search'}
+                      {searching ? (
+                        <span className="flex items-center gap-2">
+                          <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          Sending
+                        </span>
+                      ) : (
+                        '➤ Send'
+                      )}
                     </button>
                   </div>
-                  <p className="text-sm text-gray-500 mt-2">
-                    Use natural language to search your company knowledge base
-                  </p>
+                  {chatMessages.length > 0 && (
+                    <button
+                      onClick={() => setChatMessages([])}
+                      className="mt-2 text-xs text-gray-500 hover:text-gray-700"
+                    >
+                      🗑️ Clear conversation
+                    </button>
+                  )}
                 </div>
-
-                {searchResults.length > 0 && (
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-medium text-gray-900">
-                      Search Results ({searchResults.length})
-                    </h3>
-                    
-                    {searchResults.map((result, idx) => (
-                      <div
-                        key={idx}
-                        className="border border-gray-200 rounded-lg p-4 hover:border-blue-300"
-                      >
-                        <div className="flex items-start justify-between mb-2">
-                          <span className="px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded">
-                            {result.content_type}
-                          </span>
-                          <span className="text-sm font-medium text-green-600">
-                            {(result.similarity * 100).toFixed(1)}% match
-                          </span>
-                        </div>
-                        <p className="text-gray-700 whitespace-pre-wrap">{result.content}</p>
-                        {result.metadata && (
-                          <div className="mt-2 text-xs text-gray-500">
-                            {JSON.stringify(result.metadata, null, 2)}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                
-                {searchResults.length === 0 && searchQuery && !searching && (
-                  <p className="text-gray-500 text-sm text-center py-8">
-                    No results found. Try a different query.
-                  </p>
-                )}
               </div>
             )}
           </div>
         </div>
+
+        {/* Upload Modal */}
+        {showUploadModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="p-6">
+                <h2 className="text-2xl font-bold text-gray-900 mb-4">
+                  Add Document Metadata
+                </h2>
+                
+                <div className="mb-4 p-3 bg-blue-50 rounded-lg">
+                  <p className="text-sm text-blue-900">
+                    <span className="font-medium">
+                      {selectedFiles.length} file{selectedFiles.length > 1 ? 's' : ''} selected:
+                    </span>
+                    {' '}
+                    {selectedFiles.map(f => f.name).join(', ')}
+                  </p>
+                  <p className="text-xs text-blue-700 mt-1">
+                    File type{selectedFiles.length > 1 ? 's' : ''} will be automatically detected
+                  </p>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Title {selectedFiles.length === 1 && <span className="text-red-500">*</span>}
+                    </label>
+                    <input
+                      type="text"
+                      value={uploadMetadata.title}
+                      onChange={(e) => setUploadMetadata(prev => ({ ...prev, title: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="Document title"
+                    />
+                    {selectedFiles.length > 1 && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        For multiple files, individual filenames will be used
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Description
+                    </label>
+                    <textarea
+                      value={uploadMetadata.description}
+                      onChange={(e) => setUploadMetadata(prev => ({ ...prev, description: e.target.value }))}
+                      rows={3}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="Brief description of the document(s)"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Category
+                    </label>
+                    <input
+                      type="text"
+                      value={uploadMetadata.category}
+                      onChange={(e) => setUploadMetadata(prev => ({ ...prev, category: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="e.g., Marketing, Legal, Technical, Financial"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Tags (comma-separated)
+                    </label>
+                    <input
+                      type="text"
+                      value={uploadMetadata.tags}
+                      onChange={(e) => setUploadMetadata(prev => ({ ...prev, tags: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="proposal, client, 2026, important"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Add searchable tags separated by commas
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-6 flex justify-end gap-3">
+                  <button
+                    onClick={cancelUpload}
+                    disabled={uploading}
+                    className="px-4 py-2 text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleUploadWithMetadata}
+                    disabled={uploading}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {uploading ? (
+                      <>
+                        <span className="animate-spin">⏳</span>
+                        Uploading...
+                      </>
+                    ) : (
+                      <>
+                        ✓ Upload & Generate Embeddings
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

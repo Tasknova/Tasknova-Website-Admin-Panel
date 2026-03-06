@@ -408,6 +408,88 @@ export async function searchSimilarContent(
 }
 
 /**
+ * Generate chat response using RAG (Retrieval-Augmented Generation)
+ * @param query - User's question
+ * @param context - Retrieved context from embeddings
+ * @returns AI response with sources
+ */
+export async function generateChatResponse(
+  query: string,
+  context: any[]
+): Promise<{ answer: string; sources: any[]; error?: string }> {
+  try {
+    const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+    
+    if (!apiKey) {
+      return { answer: '', sources: [], error: 'Gemini API key not configured' };
+    }
+
+    // Build context string from retrieved documents
+    const contextText = context
+      .map((doc, idx) => `[${idx + 1}] ${doc.content}`)
+      .join('\n\n');
+
+    // Create prompt for Gemini
+    const prompt = `You are a helpful AI assistant that answers questions about a company using only the provided context. 
+
+CONTEXT:
+${contextText}
+
+QUESTION: ${query}
+
+INSTRUCTIONS:
+- Answer the question based ONLY on the provided context
+- If the context doesn't contain relevant information, say "I don't have enough information to answer that question."
+- Be concise and specific
+- If you reference information from the context, mention which source ([1], [2], etc.)
+
+ANSWER:`;
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{ text: prompt }]
+          }],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 1024,
+          }
+        })
+      }
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.error('Gemini chat API error:', response.status, errorData);
+      throw new Error(`Gemini API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    
+    if (!data.candidates || !data.candidates[0]?.content?.parts?.[0]?.text) {
+      throw new Error('Invalid response structure from Gemini');
+    }
+
+    const answer = data.candidates[0].content.parts[0].text;
+
+    return { answer, sources: context };
+  } catch (error) {
+    console.error('Error generating chat response:', error);
+    return {
+      answer: '',
+      sources: [],
+      error: error instanceof Error ? error.message : 'Unknown error'
+    };
+  }
+}
+
+/**
  * Delete embeddings by content type
  * @param supabase - Supabase client
  * @param userId - User ID
