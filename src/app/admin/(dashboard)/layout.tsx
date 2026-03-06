@@ -16,7 +16,9 @@ import {
   Shield,
   LogOut,
   Menu,
-  X
+  X,
+  Brain,
+  FolderKanban
 } from 'lucide-react'
 import { useState } from 'react'
 import toast from 'react-hot-toast'
@@ -31,6 +33,8 @@ const navigation = [
   { name: 'Blogs', href: '/admin/blogs', icon: BookOpen },
   { name: 'Playbooks', href: '/admin/playbooks', icon: Library },
   { name: 'Industry Reports', href: '/admin/industry-reports', icon: FileCheck },
+  { name: 'Company Brain', href: '/admin/company-brain', icon: Brain },
+  { name: 'Project Brain', href: '/admin/project-brain', icon: FolderKanban },
   { name: 'Admins', href: '/admin/admins', icon: Shield },
 ]
 
