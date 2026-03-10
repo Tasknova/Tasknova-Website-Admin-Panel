@@ -1,11 +1,60 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import {
   prepareProjectMetadataForEmbedding,
   storeProjectMetadataWithEmbedding,
-  generateProjectDocumentEmbedding,
-  searchProjectContent
+  generateDocumentEmbeddingClientSide,
+  searchProjectContent,
+  generateProjectChatResponse
 } from '@/lib/projectEmbeddings';
+
+// Automatic text extraction function via API
+async function extractTextFromFile(file: File): Promise<{ success: boolean; text: string | null; message?: string }> {
+  try {
+    // For text files, read directly (no API call needed)
+    if (file.type === 'text/plain' || file.name.endsWith('.txt')) {
+      const text = await file.text();
+      return { success: true, text: text.trim(), message: `${text.length} characters extracted` };
+    }
+    
+    // For PDF and Word files, use API route
+    const formData = new FormData();
+    formData.append('file', file);
+
+    console.log(`Calling /api/extract-text for ${file.name}...`);
+    
+    const response = await fetch('/api/extract-text', {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`API error for ${file.name}: ${response.status}`, errorText);
+      return {
+        success: false,
+        text: null,
+        message: `Extraction failed (HTTP ${response.status})`
+      };
+    }
+
+    const result = await response.json();
+    console.log(`API result for ${file.name}:`, result);
+    
+    return {
+      success: result.success,
+      text: result.text,
+      message: result.message || (result.text ? `${result.text.length} characters extracted` : 'No text extracted')
+    };
+  } catch (error) {
+    console.error(`Exception extracting text from ${file.name}:`, error);
+    return {
+      success: false,
+      text: null,
+      message: error instanceof Error ? error.message : 'Unknown error occurred'
+    };
+  }
+}
 import type { Project, ProjectMetadata, ProjectDocument } from '@/types';
 
 interface ProjectBrainPageProps {
@@ -14,9 +63,10 @@ interface ProjectBrainPageProps {
 }
 
 export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPageProps) {
-  const [activeTab, setActiveTab] = useState<'metadata' | 'documents' | 'search'>('metadata');
+  const [activeTab, setActiveTab] = useState<'metadata' | 'documents' | 'chat'>('metadata');
   const [loading, setLoading] = useState(false);
   const [userId, setUserId] = useState<string>('');
+  const chatEndRef = useRef<HTMLDivElement>(null);
   
   // Project State
   const [project, setProject] = useState<Project | null>(null);
@@ -28,7 +78,8 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
     tech_stack: [],
     requirements: '',
     key_goals: [],
-    budget_range: '',
+    budget_currency: 'USD',
+    budget_amount: undefined,
     priority_level: 'medium',
     pricing_information: '',
     additional_context: ''
@@ -37,15 +88,40 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
   // Documents State
   const [documents, setDocuments] = useState<ProjectDocument[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [extractedTexts, setExtractedTexts] = useState<Map<string, string>>(new Map());
+  const [extracting, setExtracting] = useState(false);
+  const [regeneratingEmbeddings, setRegeneratingEmbeddings] = useState(false);
+  const [regeneratingDocId, setRegeneratingDocId] = useState<string | null>(null);
+  const [editingDocId, setEditingDocId] = useState<string | null>(null);
+  const [editContentText, setEditContentText] = useState<string>('');
+  const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [uploadMetadata, setUploadMetadata] = useState({
+    title: '',
+    description: '',
+    category: '',
+    tags: ''
+  });
   
-  // Search State
+  // Chat State
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [chatMessages, setChatMessages] = useState<Array<{
+    role: 'user' | 'assistant';
+    content: string;
+    sources?: any[];
+    timestamp: Date;
+  }>>([]);
   const [searching, setSearching] = useState(false);
 
   useEffect(() => {
     initializeProject();
   }, [projectId]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
 
   async function initializeProject() {
     try {
@@ -55,7 +131,7 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
         setUserId(data.admin.id);
         await loadProject();
         await loadMetadata();
-        await loadDocuments();
+        await loadDocuments(data.admin.id);
       }
     } catch (error) {
       console.error('Failed to fetch session:', error);
@@ -92,7 +168,7 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
     }
   }
 
-  async function loadDocuments() {
+  async function loadDocuments(uid: string) {
     try {
       const { data, error } = await supabase
         .from('project_documents')
@@ -126,25 +202,76 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
         return;
       }
 
-      alert('Project metadata saved successfully!');
+      alert('✓ Project metadata saved successfully!');
       await loadMetadata();
     } catch (error) {
       console.error('Error saving:', error);
-      alert('Error saving project metadata');
+      alert('✗ Error saving project metadata');
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleFileUpload(event: React.ChangeEvent<HTMLInputElement>) {
+  async function handleFileSelect(event: React.ChangeEvent<HTMLInputElement>) {
     const files = event.target.files;
-    if (!files || !userId || !project) return;
+    if (!files || files.length === 0) return;
+
+    const fileArray = Array.from(files);
+    setSelectedFiles(fileArray);
+    setShowUploadModal(true);
+
+    // Set default title from first file name
+    if (fileArray.length === 1) {
+      setUploadMetadata(prev => ({
+        ...prev,
+        title: fileArray[0].name.replace(/\.[^/.]+$/, '') // Remove extension
+      }));
+    } else {
+      setUploadMetadata(prev => ({
+        ...prev,
+        title: `${fileArray.length} files`
+      }));
+    }
+
+    // Try to extract text from supported files automatically
+    setExtracting(true);
+    const textsMap = new Map<string, string>();
+    
+    for (const file of fileArray) {
+      const result = await extractTextFromFile(file);
+      if (result.success && result.text) {
+        textsMap.set(file.name, result.text);
+        console.log(`✓ Extracted ${result.text.length} characters from ${file.name}`);
+      } else {
+        console.log(`⚠ ${result.message || 'No text extracted'} from ${file.name}`);
+      }
+    }
+    
+    setExtractedTexts(textsMap);
+    setExtracting(false);
+
+    // Reset file input
+    event.target.value = '';
+  }
+
+  async function handleUploadWithMetadata() {
+    if (!userId || !project) return;
 
     setUploading(true);
     try {
-      for (const file of Array.from(files)) {
+      const uploadedDocs: any[] = [];
+
+      for (const file of selectedFiles) {
+        // Sanitize filename - remove special characters, replace spaces with underscores
+        const sanitizedName = file.name
+          .replace(/[^\w\s.-]/g, '') // Remove special characters except spaces, dots, hyphens
+          .replace(/\s+/g, '_')      // Replace spaces with underscores
+          .replace(/_{2,}/g, '_')    // Replace multiple underscores with single
+          .normalize('NFD')          // Normalize unicode characters
+          .replace(/[\u0300-\u036f]/g, ''); // Remove diacritics
+        
         // Upload to Supabase Storage
-        const fileName = `${Date.now()}_${file.name}`;
+        const fileName = `${Date.now()}_${sanitizedName}`;
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from('project-documents')
           .upload(`${projectId}/${fileName}`, file);
@@ -164,6 +291,15 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
         else if (file.type.includes('audio')) fileType = 'audio';
         else if (file.type.includes('document') || file.type.includes('text')) fileType = 'document';
 
+        // Parse tags
+        const tags = uploadMetadata.tags
+          .split(',')
+          .map(t => t.trim())
+          .filter(Boolean);
+
+        // Get extracted text for this file (will be null since we don't auto-extract)
+        const contentText = extractedTexts.get(file.name) || null;
+
         // Insert document record
         const { data: docData, error: docError } = await supabase
           .from('project_documents')
@@ -171,12 +307,16 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
             project_id: projectId,
             company_id: project.company_id,
             uploaded_by: userId,
-            file_name: file.name,
+            file_name: selectedFiles.length === 1 ? uploadMetadata.title || file.name : file.name,
             file_type: fileType,
             file_size: file.size,
             mime_type: file.type,
             storage_path: uploadData.path,
             storage_url: urlData.publicUrl,
+            description: uploadMetadata.description || null,
+            category: uploadMetadata.category || null,
+            tags: tags.length > 0 ? tags : null,
+            content_text: contentText,
             status: 'uploaded',
             is_deleted: false
           })
@@ -185,42 +325,248 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
 
         if (docError) throw docError;
 
-        // Generate embedding for document using Edge Function
-        await generateProjectDocumentEmbedding(
+        // Generate embedding for document directly on client-side
+        generateDocumentEmbeddingClientSide(
           supabase,
           projectId,
           project.company_id,
-          docData.id
-        );
+          docData.id,
+          project.project_name
+        ).then(result => {
+          if (result.success) {
+            console.log('✓ Successfully generated embedding for:', docData.file_name);
+          } else {
+            console.warn('⚠ Failed to generate embedding for:', docData.file_name, result.error);
+          }
+        }).catch(error => {
+          console.warn('⚠ Error generating embedding for:', docData.file_name, error);
+        });
+
+        uploadedDocs.push(docData);
       }
 
-      alert('Files uploaded successfully!');
-      await loadDocuments();
+      alert(`✓ Successfully uploaded ${uploadedDocs.length} document${uploadedDocs.length > 1 ? 's' : ''}!`);
+      await loadDocuments(userId);
+      
+      // Reset modal
+      setShowUploadModal(false);
+      setSelectedFiles([]);
+      setExtractedTexts(new Map());
+      setUploadMetadata({ title: '', description: '', category: '', tags: '' });
     } catch (error) {
       console.error('Error uploading files:', error);
-      alert('Error uploading files');
+      alert(`✗ Error uploading files: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setUploading(false);
     }
   }
 
-  async function handleSearch() {
-    if (!searchQuery) return;
+  function cancelUpload() {
+    setShowUploadModal(false);
+    setSelectedFiles([]);
+    setExtractedTexts(new Map());
+    setUploadMetadata({ title: '', description: '', category: '', tags: '' });
+  }
 
-    setSearching(true);
+  async function regenerateDocumentEmbedding(documentId: string) {
+    if (!project || !userId) return;
+
+    setRegeneratingDocId(documentId);
     try {
-      const results = await searchProjectContent(
+      const result = await generateDocumentEmbeddingClientSide(
         supabase,
         projectId,
-        searchQuery,
-        0.75,
-        10
+        project.company_id,
+        documentId,
+        project.project_name
       );
 
-      setSearchResults(results);
+      if (result.success) {
+        alert('✓ Successfully regenerated embedding!');
+      } else {
+        throw new Error(result.error || 'Failed to regenerate embedding');
+      }
+    } catch (error) {
+      console.error('Error regenerating embedding:', error);
+      alert(`✗ Error: ${error instanceof Error ? error.message : 'Failed to regenerate embedding'}`);
+    } finally {
+      setRegeneratingDocId(null);
+    }
+  }
+
+  function confirmDeleteDocument(documentId: string) {
+    setDeletingDocId(documentId);
+    setShowDeleteConfirm(true);
+  }
+
+  async function deleteDocument() {
+    if (!deletingDocId || !userId) return;
+
+    try {
+      const docToDelete = documents.find(d => d.id === deletingDocId);
+      if (!docToDelete) throw new Error('Document not found');
+
+      // Delete from storage if exists
+      if (docToDelete.storage_url) {
+        const path = docToDelete.storage_url.split('/').slice(-2).join('/');
+        const { error: storageError } = await supabase.storage
+          .from('project-documents')
+          .remove([path]);
+        
+        if (storageError) {
+          console.warn('Storage deletion warning:', storageError);
+        }
+      }
+
+      // Delete document and embeddings from database
+      const { error: deleteError } = await supabase
+        .from('project_documents')
+        .delete()
+        .eq('id', deletingDocId);
+
+      if (deleteError) throw deleteError;
+
+      alert('✓ Successfully deleted document!');
+      await loadDocuments(userId);
+      
+    } catch (error) {
+      console.error('Error deleting document:', error);
+      alert(`✗ Error: ${error instanceof Error ? error.message : 'Failed to delete document'}`);
+    } finally {
+      setDeletingDocId(null);
+      setShowDeleteConfirm(false);
+    }
+  }
+
+  async function regenerateAllEmbeddings() {
+    if (!project || !userId) return;
+
+    setRegeneratingEmbeddings(true);
+    try {
+      let successCount = 0;
+      let failCount = 0;
+
+      for (const doc of documents) {
+        try {
+          const result = await generateDocumentEmbeddingClientSide(
+            supabase,
+            projectId,
+            project.company_id,
+            doc.id!,
+            project.project_name
+          );
+
+          if (result.success) {
+            successCount++;
+            console.log(`✓ Generated embedding for: ${doc.file_name}`);
+          } else {
+            failCount++;
+            console.error(`✗ Failed for: ${doc.file_name}`, result.error);
+          }
+        } catch (error) {
+          failCount++;
+          console.error(`✗ Error for: ${doc.file_name}`, error);
+        }
+      }
+
+      alert(`✓ Regeneration complete!\n${successCount} succeeded, ${failCount} failed`);
+    } catch (error) {
+      console.error('Error regenerating embeddings:', error);
+      alert(`✗ Error: ${error instanceof Error ? error.message : 'Failed to regenerate embeddings'}`);
+    } finally {
+      setRegeneratingEmbeddings(false);
+    }
+  }
+
+  function startEditingContent(doc: ProjectDocument) {
+    setEditingDocId(doc.id!);
+    setEditContentText((doc as any).content_text || '');
+  }
+
+  async function saveDocumentContent() {
+    if (!editingDocId || !project) return;
+
+    try {
+      const { error } = await supabase
+        .from('project_documents')
+        .update({ content_text: editContentText })
+        .eq('id', editingDocId);
+
+      if (error) throw error;
+
+      // Regenerate embedding with new content
+      await generateDocumentEmbeddingClientSide(
+        supabase,
+        projectId,
+        project.company_id,
+        editingDocId,
+        project.project_name
+      );
+
+      alert('✓ Content updated and embedding regenerated!');
+      setEditingDocId(null);
+      setEditContentText('');
+      await loadDocuments(userId);
+    } catch (error) {
+      console.error('Error saving content:', error);
+      alert(`✗ Error: ${error instanceof Error ? error.message : 'Failed to save content'}`);
+    }
+  }
+
+  function cancelEditContent() {
+    setEditingDocId(null);
+    setEditContentText('');
+  }
+
+  async function handleSearch() {
+    if (!searchQuery || !userId) return;
+
+    // Add user message to chat
+    const userMessage = {
+      role: 'user' as const,
+      content: searchQuery,
+      timestamp: new Date()
+    };
+    setChatMessages(prev => [...prev, userMessage]);
+    setSearching(true);
+    setSearchQuery('');
+
+    try {
+      // Search for relevant content
+      const searchResults = await searchProjectContent(
+        supabase,
+        projectId,
+        userMessage.content,
+        0.75,
+        5
+      );
+
+      // Generate AI response using RAG
+      const { answer, sources, error } = await generateProjectChatResponse(
+        userMessage.content,
+        searchResults
+      );
+
+      if (error) {
+        throw new Error(error);
+      }
+
+      // Add assistant message to chat
+      const assistantMessage = {
+        role: 'assistant' as const,
+        content: answer || 'I apologize, but I encountered an error generating a response.',
+        sources: sources,
+        timestamp: new Date()
+      };
+      setChatMessages(prev => [...prev, assistantMessage]);
     } catch (error) {
       console.error('Error searching:', error);
-      alert('Error performing search');
+      const errorMessage = {
+        role: 'assistant' as const,
+        content: `Error: ${error instanceof Error ? error.message : 'Failed to search project knowledge'}`,
+        timestamp: new Date()
+      };
+      setChatMessages(prev => [...prev, errorMessage]);
     } finally {
       setSearching(false);
     }
@@ -245,11 +591,11 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
               onClick={onBack}
               className="text-blue-600 hover:text-blue-700 mb-2 flex items-center"
             >
-              ← Back to Project
+              ← Back to Projects
             </button>
             <h1 className="text-3xl font-bold text-gray-900">{project.project_name} - Brain</h1>
             <p className="text-gray-600 mt-2">
-              Store and manage project-specific knowledge with semantic search
+              Store and manage project-specific knowledge with semantic search and AI chat
             </p>
           </div>
         </div>
@@ -259,19 +605,20 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
           <div className="border-b border-gray-200">
             <nav className="flex -mb-px">
               {[
-                { id: 'metadata' as const, label: 'Project Metadata' },
-                { id: 'documents' as const, label: 'Documents' },
-                { id: 'search' as const, label: 'Search' }
+                { id: 'metadata' as const, label: 'Project Metadata', icon: '📋' },
+                { id: 'documents' as const, label: 'Documents', icon: '📄' },
+                { id: 'chat' as const, label: 'AI Chat', icon: '💬' }
               ].map(tab => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`px-6 py-3 border-b-2 font-medium text-sm ${
+                  className={`px-6 py-3 border-b-2 font-medium text-sm flex items-center gap-2 ${ 
                     activeTab === tab.id
                       ? 'border-blue-500 text-blue-600'
                       : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                   }`}
                 >
+                  <span>{tab.icon}</span>
                   {tab.label}
                 </button>
               ))}
@@ -291,8 +638,8 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
                       type="text"
                       value={metadata.domain || ''}
                       onChange={(e) => setMetadata(prev => ({ ...prev, domain: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                      placeholder="e.g., Healthcare, Finance"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="e.g., Healthcare, Finance, Education"
                     />
                   </div>
                   
@@ -304,7 +651,8 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
                       type="text"
                       value={metadata.industry || ''}
                       onChange={(e) => setMetadata(prev => ({ ...prev, industry: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="e.g., SaaS, E-commerce, Healthcare"
                     />
                   </div>
                 </div>
@@ -318,22 +666,37 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
                       type="text"
                       value={metadata.project_type || ''}
                       onChange={(e) => setMetadata(prev => ({ ...prev, project_type: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                      placeholder="e.g., Web App, Mobile App"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="e.g., Web App, Mobile App, API"
                     />
                   </div>
                   
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Budget Range
+                      Budget
                     </label>
-                    <input
-                      type="text"
-                      value={metadata.budget_range || ''}
-                      onChange={(e) => setMetadata(prev => ({ ...prev, budget_range: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                      placeholder="e.g., $50k-$100k"
-                    />
+                    <div className="flex gap-2">
+                      <select
+                        value={metadata.budget_currency || 'USD'}
+                        onChange={(e) => setMetadata(prev => ({ ...prev, budget_currency: e.target.value }))}
+                        className="w-32 px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="USD">USD ($)</option>
+                        <option value="EUR">EUR (€)</option>
+                        <option value="GBP">GBP (£)</option>
+                        <option value="INR">INR (₹)</option>
+                        <option value="JPY">JPY (¥)</option>
+                      </select>
+                      <input
+                        type="number"
+                        value={metadata.budget_amount || ''}
+                        onChange={(e) => setMetadata(prev => ({ ...prev, budget_amount: e.target.value ? parseFloat(e.target.value) : undefined }))}
+                        className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        placeholder="Enter budget amount"
+                        min="0"
+                        step="0.01"
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -345,7 +708,8 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
                     type="text"
                     value={metadata.target_audience || ''}
                     onChange={(e) => setMetadata(prev => ({ ...prev, target_audience: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="e.g., Small businesses, Enterprise clients, Consumers"
                   />
                 </div>
 
@@ -357,8 +721,8 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
                     type="text"
                     value={metadata.tech_stack?.join(', ') || ''}
                     onChange={(e) => handleArrayInput('tech_stack', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                    placeholder="React, Node.js, PostgreSQL"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="React, Node.js, PostgreSQL, AWS"
                   />
                 </div>
 
@@ -370,7 +734,7 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
                     type="text"
                     value={metadata.key_goals?.join(', ') || ''}
                     onChange={(e) => handleArrayInput('key_goals', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     placeholder="Improve performance, Reduce costs, Increase engagement"
                   />
                 </div>
@@ -383,7 +747,8 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
                     value={metadata.requirements || ''}
                     onChange={(e) => setMetadata(prev => ({ ...prev, requirements: e.target.value }))}
                     rows={4}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="Detailed project requirements..."
                   />
                 </div>
 
@@ -395,7 +760,7 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
                     value={metadata.pricing_information || ''}
                     onChange={(e) => setMetadata(prev => ({ ...prev, pricing_information: e.target.value }))}
                     rows={3}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     placeholder="Details about pricing model, tiers, packages..."
                   />
                 </div>
@@ -408,7 +773,7 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
                     value={metadata.additional_context || ''}
                     onChange={(e) => setMetadata(prev => ({ ...prev, additional_context: e.target.value }))}
                     rows={5}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     placeholder="Add any additional project information that should be searchable..."
                   />
                 </div>
@@ -420,7 +785,7 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
                   <select
                     value={metadata.priority_level || 'medium'}
                     onChange={(e) => setMetadata(prev => ({ ...prev, priority_level: e.target.value as any }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   >
                     <option value="low">Low</option>
                     <option value="medium">Medium</option>
@@ -433,9 +798,16 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
                   <button
                     onClick={handleSaveMetadata}
                     disabled={loading}
-                    className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+                    className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                   >
-                    {loading ? 'Saving...' : 'Save Metadata & Generate Embeddings'}
+                    {loading ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                        Saving...
+                      </>
+                    ) : (
+                      'Save Metadata & Generate Embeddings'
+                    )}
                   </button>
                 </div>
               </div>
@@ -444,39 +816,246 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
             {/* Documents Tab */}
             {activeTab === 'documents' && (
               <div className="space-y-6">
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
+                <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center bg-gray-50 hover:bg-gray-100 transition-colors">
                   <input
                     type="file"
                     multiple
-                    onChange={handleFileUpload}
+                    onChange={handleFileSelect}
                     className="hidden"
                     id="file-upload"
                     disabled={uploading}
                   />
                   <label
                     htmlFor="file-upload"
-                    className="cursor-pointer text-blue-600 hover:text-blue-700"
+                    className="cursor-pointer"
                   >
-                    {uploading ? 'Uploading...' : 'Click to upload project documents'}
+                    <div className="text-5xl mb-3">📁</div>
+                    <span className="text-blue-600 hover:text-blue-700 font-medium">
+                      {uploading ? 'Uploading...' : 'Click to upload project documents'}
+                    </span>
+                    <p className="text-sm text-gray-500 mt-2">
+                      Upload requirements, designs, specs, or any project-related files
+                    </p>
                   </label>
-                  <p className="text-sm text-gray-500 mt-2">
-                    Upload requirements, designs, specs, or any project-related files
-                  </p>
                 </div>
 
+                {/* Upload Metadata Modal */}
+                {showUploadModal && (
+                  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-lg p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                      <h2 className="text-xl font-semibold mb-4">Document Details</h2>
+                      
+                      <div className="mb-4 bg-blue-50 rounded-lg p-3">
+                        <p className="text-sm text-blue-800">
+                          📎 Selected: <strong>{selectedFiles.length}</strong> file{selectedFiles.length > 1 ? 's' : ''}
+                        </p>
+                        <div className="text-xs text-blue-600 mt-1">
+                          {selectedFiles.map(f => f.name).join(', ')}
+                        </div>
+                      </div>
+
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Title {selectedFiles.length === 1 && <span className="text-red-500">*</span>}
+                          </label>
+                          <input
+                            type="text"
+                            value={uploadMetadata.title}
+                            onChange={(e) => setUploadMetadata(prev => ({ ...prev, title: e.target.value }))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            placeholder="Document title"
+                          />
+                          {selectedFiles.length > 1 && (
+                            <p className="text-xs text-gray-500 mt-1">
+                              For multiple files, individual filenames will be used
+                            </p>
+                          )}
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Description
+                          </label>
+                          <textarea
+                            value={uploadMetadata.description}
+                            onChange={(e) => setUploadMetadata(prev => ({ ...prev, description: e.target.value }))}
+                            rows={3}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            placeholder="Brief description of the document(s)"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Category
+                          </label>
+                          <input
+                            type="text"
+                            value={uploadMetadata.category}
+                            onChange={(e) => setUploadMetadata(prev => ({ ...prev, category: e.target.value }))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            placeholder="e.g., Requirements, Design, Specifications, Legal"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Tags (comma-separated)
+                          </label>
+                          <input
+                            type="text"
+                            value={uploadMetadata.tags}
+                            onChange={(e) => setUploadMetadata(prev => ({ ...prev, tags: e.target.value }))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            placeholder="sprint-1, backend, api, important"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">
+                            Add searchable tags separated by commas
+                          </p>
+                        </div>
+
+                        {/* Document Content Entry */}
+                        <div className="border border-blue-200 bg-blue-50 rounded-lg p-4">
+                          <h4 className="text-sm font-medium text-gray-900 mb-3">
+                            🤖 Automatic Text Extraction {extracting && <span className="text-blue-600">(Processing...)</span>}
+                          </h4>
+                          
+                          {extracting ? (
+                            <div className="flex items-center gap-2 text-sm text-blue-700 py-4">
+                              <span className="animate-spin">⏳</span>
+                              <span>Extracting text from documents for AI search...</span>
+                            </div>
+                          ) : (
+                            <>
+                              {selectedFiles.map((file, index) => {
+                                const hasExtractedText = extractedTexts.has(file.name);
+                                const extractedText = extractedTexts.get(file.name) || '';
+                                const isPdfOrWord = file.type === 'application/pdf' || 
+                                                   file.type.includes('word') || 
+                                                   file.name.endsWith('.pdf') || 
+                                                   file.name.endsWith('.docx') ||
+                                                   file.name.endsWith('.doc');
+                                
+                                return (
+                                  <div key={index} className="mb-4 last:mb-0">
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                      {file.name}
+                                      {hasExtractedText && (
+                                        <span className="ml-2 text-green-600 text-xs font-semibold">
+                                          ✓ {extractedText.length.toLocaleString()} characters extracted
+                                        </span>
+                                      )}
+                                      {!hasExtractedText && isPdfOrWord && (
+                                        <span className="ml-2 text-yellow-600 text-xs">
+                                          ⚠ Failed to auto-extract - paste text manually
+                                        </span>
+                                      )}
+                                    </label>
+                                    <textarea
+                                      value={extractedText}
+                                      onChange={(e) => {
+                                        const newMap = new Map(extractedTexts);
+                                        newMap.set(file.name, e.target.value);
+                                        setExtractedTexts(newMap);
+                                      }}
+                                      rows={6}
+                                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+                                      placeholder={
+                                        isPdfOrWord
+                                          ? "Text will be extracted automatically, or paste manually if extraction fails..."
+                                          : "Enter document content for AI search..."
+                                      }
+                                    />
+                                    <p className="text-xs text-gray-500 mt-1">
+                                      {extractedText.length.toLocaleString()} characters
+                                      {extractedText.length === 0 && (
+                                        <span className="ml-2 text-yellow-600 font-medium">
+                                          • Without content, AI cannot search this document
+                                        </span>
+                                      )}
+                                    </p>
+                                  </div>
+                                );
+                              })}
+                              
+                              <div className="mt-3 pt-3 border-t border-blue-200">
+                                <p className="text-xs text-gray-600">
+                                  💡 <strong>AI Search:</strong> Text content is automatically extracted from PDF/Word files. 
+                                  If extraction fails, copy text from your document (Ctrl+A, Ctrl+C) and paste above.
+                                </p>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="mt-6 flex justify-end gap-3">
+                        <button
+                          onClick={cancelUpload}
+                          disabled={uploading || extracting}
+                          className="px-4 py-2 text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={handleUploadWithMetadata}
+                          disabled={uploading || extracting}
+                          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+                        >
+                          {uploading ? (
+                            <>
+                              <span className="animate-spin">⏳</span>
+                              Uploading...
+                            </>
+                          ) : (
+                            <>
+                              Upload {selectedFiles.length} File{selectedFiles.length > 1 ? 's' : ''}
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div className="space-y-4">
-                  <h3 className="text-lg font-medium text-gray-900">
-                    Project Documents ({documents.length})
-                  </h3>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-medium text-gray-900">
+                      Project Documents ({documents.length})
+                    </h3>
+                    {documents.length > 0 && (
+                      <button
+                        onClick={regenerateAllEmbeddings}
+                        disabled={regeneratingEmbeddings}
+                        className="px-3 py-1.5 bg-purple-600 text-white text-sm rounded-md hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2"
+                      >
+                        {regeneratingEmbeddings ? (
+                          <>
+                            <span className="animate-spin">⏳</span>
+                            Regenerating...
+                          </>
+                        ) : (
+                          <>
+                            <span>🔄</span>
+                            Regenerate All Embeddings
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
                   
                   {documents.length === 0 ? (
-                    <p className="text-gray-500 text-sm">No documents uploaded yet</p>
+                    <div className="text-center py-12 bg-gray-50 rounded-lg">
+                      <p className="text-gray-500 text-sm">No documents uploaded yet</p>
+                      <p className="text-gray-400 text-xs mt-1">Upload your first document to get started</p>
+                    </div>
                   ) : (
                     <div className="grid gap-4">
                       {documents.map(doc => (
                         <div
                           key={doc.id}
-                          className="border border-gray-200 rounded-lg p-4 hover:border-blue-300"
+                          className="border border-gray-200 rounded-lg p-4 hover:border-blue-300 hover:shadow-sm transition-all"
                         >
                           <div className="flex items-start justify-between">
                             <div className="flex-1">
@@ -484,115 +1063,337 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
                                 {doc.title || doc.file_name}
                               </h4>
                               <div className="flex items-center gap-4 mt-2 text-sm text-gray-500">
-                                <span className="px-2 py-1 bg-gray-100 rounded">{doc.file_type}</span>
+                                <span className="px-2 py-1 bg-gray-100 rounded uppercase text-xs font-medium">
+                                  {doc.file_type}
+                                </span>
                                 <span>{((doc.file_size || 0) / 1024).toFixed(2)} KB</span>
-                                {doc.category && <span>Category: {doc.category}</span>}
+                                {doc.category && (
+                                  <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs">
+                                    {doc.category}
+                                  </span>
+                                )}
                               </div>
                               {doc.description && (
                                 <p className="text-sm text-gray-600 mt-2">{doc.description}</p>
                               )}
                               {doc.tags && doc.tags.length > 0 && (
-                                <div className="flex gap-2 mt-2">
+                                <div className="flex gap-2 mt-2 flex-wrap">
                                   {doc.tags.map((tag, idx) => (
                                     <span
                                       key={idx}
                                       className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded"
                                     >
-                                      {tag}
+                                      #{tag}
                                     </span>
                                   ))}
                                 </div>
                               )}
+                              {(doc as any).content_text && (
+                                <div className="mt-2">
+                                  <details className="text-sm">
+                                    <summary className="cursor-pointer text-gray-500 hover:text-gray-700">
+                                      📄 Document Content ({(doc as any).content_text.length} characters)
+                                    </summary>
+                                    <div className="mt-2 p-3 bg-gray-50 rounded text-xs text-gray-600 max-h-40 overflow-y-auto font-mono whitespace-pre-wrap">
+                                      {(doc as any).content_text}
+                                    </div>
+                                  </details>
+                                </div>
+                              )}
+                              {!(doc as any).content_text && (
+                                <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-800">
+                                  ⚠️ No content text - AI cannot search this document. Click "Add Content" to fix.
+                                </div>
+                              )}
                             </div>
-                            {doc.storage_url && (
-                              <a
-                                href={doc.storage_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-blue-600 hover:text-blue-700 text-sm"
+                            <div className="flex items-center gap-2 ml-4">
+                              <button
+                                onClick={() => startEditingContent(doc)}
+                                className="px-3 py-1.5 bg-green-100 text-green-700 text-sm rounded hover:bg-green-200 flex items-center gap-1"
+                                title="Add/Edit document content for AI"
                               >
-                                View
-                              </a>
-                            )}
+                                <span>✏️</span>
+                                <span className="text-xs">{(doc as any).content_text ? 'Edit' : 'Add'} Content</span>
+                              </button>
+                              <button
+                                onClick={() => regenerateDocumentEmbedding(doc.id!)}
+                                disabled={regeneratingDocId === doc.id}
+                                className="px-3 py-1.5 bg-purple-100 text-purple-700 text-sm rounded hover:bg-purple-200 disabled:opacity-50 flex items-center gap-1"
+                                title="Regenerate AI embeddings"
+                              >
+                                {regeneratingDocId === doc.id ? (
+                                  <>
+                                    <span className="animate-spin text-xs">⏳</span>
+                                    <span className="text-xs">Regenerating...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span>🔄</span>
+                                    <span className="text-xs">Regenerate</span>
+                                  </>
+                                )}
+                              </button>
+                              {doc.storage_url && (
+                                <a
+                                  href={doc.storage_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="px-3 py-1.5 text-blue-600 hover:text-blue-700 text-sm font-medium hover:bg-blue-50 rounded"
+                                  title="View document"
+                                >
+                                  View →
+                                </a>
+                              )}
+                              <button
+                                onClick={() => confirmDeleteDocument(doc.id!)}
+                                className="px-3 py-1.5 bg-red-100 text-red-700 text-sm rounded hover:bg-red-200 flex items-center gap-1"
+                                title="Delete document"
+                              >
+                                <span>🗑️</span>
+                                <span className="text-xs">Delete</span>
+                              </button>
+                            </div>
                           </div>
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
+
+                {/* Edit Content Modal */}
+                {editingDocId && (
+                  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-lg p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+                      <h2 className="text-xl font-semibold mb-4">Edit Document Content</h2>
+                      
+                      <div className="mb-4 bg-blue-50 rounded-lg p-3">
+                        <p className="text-sm text-blue-800">
+                          📝 Paste the actual text content from your document. This is what the AI will use to answer questions.
+                        </p>
+                      </div>
+
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Document Content <span className="text-red-500">*</span>
+                          </label>
+                          <textarea
+                            value={editContentText}
+                            onChange={(e) => setEditContentText(e.target.value)}
+                            rows={20}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+                            placeholder="Paste the complete text content from your PDF or Word document here..."
+                          />
+                          <p className="text-xs text-gray-500 mt-1">
+                            {editContentText.length} characters • This text will be used to generate AI embeddings
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mt-6 flex justify-end gap-3">
+                        <button
+                          onClick={cancelEditContent}
+                          className="px-4 py-2 text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={saveDocumentContent}
+                          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center gap-2"
+                        >
+                          <span>💾</span>
+                          Save & Regenerate Embedding
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
-            {/* Search Tab */}
-            {activeTab === 'search' && (
+            {/* Chat/Search Tab */}
+            {activeTab === 'chat' && (
               <div className="space-y-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Search Project Knowledge
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                      placeholder="What are the technical requirements?"
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-md"
-                    />
-                    <button
-                      onClick={handleSearch}
-                      disabled={searching || !searchQuery}
-                      className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
-                    >
-                      {searching ? 'Searching...' : 'Search'}
-                    </button>
-                  </div>
-                  <p className="text-sm text-gray-500 mt-2">
-                    Search through project metadata and documents using natural language
+                <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-lg p-4">
+                  <h3 className="font-medium text-gray-900 mb-1">💬 AI Project Assistant</h3>
+                  <p className="text-sm text-gray-600">
+                    Ask questions about your project using natural language. The AI will search through project metadata and documents to provide accurate answers.
                   </p>
                 </div>
 
-                {searchResults.length > 0 && (
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-medium text-gray-900">
-                      Search Results ({searchResults.length})
-                    </h3>
-                    
-                    {searchResults.map((result, idx) => (
-                      <div
-                        key={idx}
-                        className="border border-gray-200 rounded-lg p-4 hover:border-blue-300"
-                      >
-                        <div className="flex items-start justify-between mb-2">
-                          <span className="px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded">
-                            {result.content_type}
-                          </span>
-                          <span className="text-sm font-medium text-green-600">
-                            {(result.similarity * 100).toFixed(1)}% match
-                          </span>
-                        </div>
-                        <p className="text-gray-700 whitespace-pre-wrap">{result.content}</p>
-                        {result.metadata && (
-                          <div className="mt-2 text-xs text-gray-500">
-                            {result.metadata.file_name && (
-                              <span className="font-medium">Source: {result.metadata.file_name}</span>
+                {/* Chat Messages */}
+                <div className="border border-gray-200 rounded-lg p-4 min-h-[400px] max-h-[600px] overflow-y-auto bg-white">
+                  {chatMessages.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-full text-gray-400 py-12">
+                      <div className="text-6xl mb-4">💡</div>
+                      <p className="text-sm text-center">
+                        Start a conversation by asking about your project
+                      </p>
+                      <p className="text-xs text-center mt-2">
+                        Example: "What are the technical requirements?" or "What's the project timeline?"
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {chatMessages.map((message, idx) => (
+                        <div
+                          key={idx}
+                          className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                        >
+                          <div
+                            className={`max-w-[80%] rounded-lg p-4 ${
+                              message.role === 'user'
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-gray-100 text-gray-900'
+                            }`}
+                          >
+                            <div className="flex items-start gap-2 mb-1">
+                              <span className="text-sm font-semibold">
+                                {message.role === 'user' ? '👤 You' : '🤖 AI Assistant'}
+                              </span>
+                              <span className="text-xs opacity-70">
+                                {message.timestamp.toLocaleTimeString()}
+                              </span>
+                            </div>
+                            <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                            
+                            {message.sources && message.sources.length > 0 && (
+                              <details className="mt-3 text-xs">
+                                <summary className="cursor-pointer font-medium opacity-80 hover:opacity-100">
+                                  📚 Sources ({message.sources.length})
+                                </summary>
+                                <div className="mt-2 space-y-2 pl-4">
+                                  {message.sources.map((source, sidx) => (
+                                    <div key={sidx} className="bg-white/10 rounded p-2">
+                                      <div className="flex items-center gap-2">
+                                        <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded text-xs font-medium">
+                                          {source.content_type}
+                                        </span>
+                                        <span className="text-green-600 font-medium">
+                                          {(source.similarity * 100).toFixed(1)}% match
+                                        </span>
+                                      </div>
+                                      {source.metadata && (
+                                        <div className="mt-1">
+                                          {source.metadata.file_name && (
+                                            <div className="text-xs">
+                                              📄 {source.metadata.file_name}
+                                            </div>
+                                          )}
+                                          {source.metadata.category && (
+                                            <div className="text-xs">
+                                              🏷️ Category: {source.metadata.category}
+                                            </div>
+                                          )}
+                                        </div>
+                                      )}
+                                      <p className="mt-1 text-xs opacity-70 line-clamp-2">
+                                        {source.content}
+                                      </p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </details>
                             )}
                           </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                
-                {searchResults.length === 0 && searchQuery && !searching && (
-                  <p className="text-gray-500 text-sm text-center py-8">
-                    No results found. Try a different query.
-                  </p>
-                )}
+                        </div>
+                      ))}
+                      <div ref={chatEndRef} />
+                    </div>
+                  )}
+                </div>
+
+                {/* Search Input */}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && !searching && handleSearch()}
+                    placeholder="Ask about your project... (e.g., 'What are the technical requirements?')"
+                    className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    disabled={searching}
+                  />
+                  {chatMessages.length > 0 && (
+                    <button
+                      onClick={() => setChatMessages([])}
+                      className="px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center gap-2 font-medium"
+                      title="Clear chat history"
+                    >
+                      <span>🗑️</span>
+                      <span>Clear</span>
+                    </button>
+                  )}
+                  <button
+                    onClick={handleSearch}
+                    disabled={searching || !searchQuery}
+                    className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 font-medium"
+                  >
+                    {searching ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                        Thinking...
+                      </>
+                    ) : (
+                      <>
+                        <span>Send</span>
+                        <span>→</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500 text-center">
+                  The AI assistant searches through your project metadata and documents to provide accurate, context-aware answers
+                </p>
               </div>
             )}
           </div>
         </div>
+
+        {/* Delete Confirmation Modal */}
+        {showDeleteConfirm && deletingDocId && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-lg p-6 max-w-md w-full">
+              <h2 className="text-xl font-semibold mb-4 text-gray-900">🗑️ Delete Document</h2>
+              
+              <div className="mb-6">
+                <p className="text-gray-700 mb-2">
+                  Are you sure you want to delete this document?
+                </p>
+                <p className="text-sm text-gray-600">
+                  This will permanently remove:
+                </p>
+                <ul className="text-sm text-gray-600 mt-2 ml-4 list-disc space-y-1">
+                  <li>The document file from storage</li>
+                  <li>Document metadata and content</li>
+                  <li>AI embeddings for this document</li>
+                </ul>
+                <p className="text-sm text-red-600 font-medium mt-3">
+                  ⚠️ This action cannot be undone.
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => {
+                    setShowDeleteConfirm(false);
+                    setDeletingDocId(null);
+                  }}
+                  className="px-4 py-2 text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={deleteDocument}
+                  className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 flex items-center gap-2"
+                >
+                  <span>🗑️</span>
+                  Delete Document
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

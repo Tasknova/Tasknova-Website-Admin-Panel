@@ -278,7 +278,8 @@ export interface ProjectMetadata {
   key_goals?: string[]
   milestones?: any
   team_size?: number
-  budget_range?: string
+  budget_currency?: string
+  budget_amount?: number
   // Priority & Pricing
   priority_level?: 'low' | 'medium' | 'high' | 'critical'
   pricing_information?: string
@@ -307,8 +308,10 @@ export interface ProjectDocument {
   description?: string
   tags?: string[]
   category?: string
-  // Processing
+  // Content
+  content_text?: string  // Text content for AI embeddings
   extracted_text?: string
+  // Processing
   status: 'uploaded' | 'processing' | 'processed' | 'failed'
   // Soft Delete
   is_deleted: boolean

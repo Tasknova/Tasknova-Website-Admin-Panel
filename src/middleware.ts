@@ -5,6 +5,11 @@ import { verifySession } from './lib/auth'
 export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname
 
+  // Skip middleware for API routes
+  if (path.startsWith('/api/')) {
+    return NextResponse.next()
+  }
+
   // Public paths
   if (path === '/admin/login') {
     const token = request.cookies.get('admin_session')?.value

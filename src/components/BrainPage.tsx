@@ -8,6 +8,54 @@ import {
 } from '@/lib/embeddings';
 import type { CompanyBrain, BrainDocument, DocumentGroup } from '@/types';
 
+// Automatic text extraction function via API
+async function extractTextFromFile(file: File): Promise<{ success: boolean; text: string | null; message?: string }> {
+  try {
+    // For text files, read directly (no API call needed)
+    if (file.type === 'text/plain' || file.name.endsWith('.txt')) {
+      const text = await file.text();
+      return { success: true, text: text.trim(), message: `${text.length} characters extracted` };
+    }
+    
+    // For PDF and Word files, use API route
+    const formData = new FormData();
+    formData.append('file', file);
+
+    console.log(`Calling /api/extract-text for ${file.name}...`);
+    
+    const response = await fetch('/api/extract-text', {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`API error for ${file.name}: ${response.status}`, errorText);
+      return {
+        success: false,
+        text: null,
+        message: `Extraction failed (HTTP ${response.status})`
+      };
+    }
+
+    const result = await response.json();
+    console.log(`API result for ${file.name}:`, result);
+    
+    return {
+      success: result.success,
+      text: result.text,
+      message: result.message || (result.text ? `${result.text.length} characters extracted` : 'No text extracted')
+    };
+  } catch (error) {
+    console.error(`Exception extracting text from ${file.name}:`, error);
+    return {
+      success: false,
+      text: null,
+      message: error instanceof Error ? error.message : 'Unknown error occurred'
+    };
+  }
+}
+
 interface BrainPageProps {
   onBack: () => void;
 }
@@ -47,11 +95,15 @@ export default function BrainPage({ onBack }: BrainPageProps) {
   const [uploading, setUploading] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [extractedTexts, setExtractedTexts] = useState<Map<string, string>>(new Map());
+  const [extracting, setExtracting] = useState(false);
   const [uploadMetadata, setUploadMetadata] = useState({
     title: '',
     description: '',
     category: '',
-    tags: ''
+    tags: '',
+    budgetCurrency: 'USD',
+    budgetAmount: ''
   });
   
   // Search State
@@ -181,6 +233,7 @@ export default function BrainPage({ onBack }: BrainPageProps) {
 
     const fileArray = Array.from(files);
     setSelectedFiles(fileArray);
+    setShowUploadModal(true);
     
     // Set default title from first file name
     if (fileArray.length === 1) {
@@ -195,7 +248,23 @@ export default function BrainPage({ onBack }: BrainPageProps) {
       }));
     }
     
-    setShowUploadModal(true);
+    // Try to extract text from supported files automatically
+    setExtracting(true);
+    const textsMap = new Map<string, string>();
+    
+    for (const file of fileArray) {
+      const result = await extractTextFromFile(file);
+      if (result.success && result.text) {
+        textsMap.set(file.name, result.text);
+        console.log(`✓ Extracted ${result.text.length} characters from ${file.name}`);
+      } else {
+        console.log(`⚠ ${result.message || 'No text extracted'} from ${file.name}`);
+      }
+    }
+    
+    setExtractedTexts(textsMap);
+    setExtracting(false);
+
     // Reset file input
     event.target.value = '';
   }
@@ -208,8 +277,16 @@ export default function BrainPage({ onBack }: BrainPageProps) {
       const uploadedDocs = [];
       
       for (const file of selectedFiles) {
+        // Sanitize filename - remove special characters, replace spaces with underscores
+        const sanitizedName = file.name
+          .replace(/[^\w\s.-]/g, '') // Remove special characters except spaces, dots, hyphens
+          .replace(/\s+/g, '_')      // Replace spaces with underscores
+          .replace(/_{2,}/g, '_')    // Replace multiple underscores with single
+          .normalize('NFD')          // Normalize unicode characters
+          .replace(/[\u0300-\u036f]/g, ''); // Remove diacritics
+        
         // Upload to Supabase Storage
-        const fileName = `${Date.now()}_${file.name}`;
+        const fileName = `${Date.now()}_${sanitizedName}`;
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from('brain-documents')
           .upload(`${userId}/${fileName}`, file);
@@ -235,6 +312,9 @@ export default function BrainPage({ onBack }: BrainPageProps) {
           .map(t => t.trim())
           .filter(Boolean);
 
+        // Get extracted text for this file
+        const contentText = extractedTexts.get(file.name) || null;
+
         // Insert document record
         const { data: docData, error: docError } = await supabase
           .from('brain_documents')
@@ -249,6 +329,9 @@ export default function BrainPage({ onBack }: BrainPageProps) {
             description: uploadMetadata.description || null,
             category: uploadMetadata.category || null,
             tags: tags.length > 0 ? tags : null,
+            content_text: contentText,
+            budget_currency: uploadMetadata.budgetCurrency || null,
+            budget_amount: uploadMetadata.budgetAmount ? parseFloat(uploadMetadata.budgetAmount) : null,
             status: 'uploaded'
           })
           .select()
@@ -262,7 +345,8 @@ export default function BrainPage({ onBack }: BrainPageProps) {
           uploadMetadata.description ? `Description: ${uploadMetadata.description}` : '',
           uploadMetadata.category ? `Category: ${uploadMetadata.category}` : '',
           tags.length ? `Tags: ${tags.join(', ')}` : '',
-          `Type: ${fileType}`
+          `Type: ${fileType}`,
+          contentText ? `\nCONTENT:\n${contentText}` : ''
         ].filter(Boolean).join('\n');
         
         const { generateEmbedding } = await import('@/lib/embeddings');
@@ -298,7 +382,8 @@ export default function BrainPage({ onBack }: BrainPageProps) {
       // Reset modal
       setShowUploadModal(false);
       setSelectedFiles([]);
-      setUploadMetadata({ title: '', description: '', category: '', tags: '' });
+      setExtractedTexts(new Map());
+      setUploadMetadata({ title: '', description: '', category: '', tags: '', budgetCurrency: 'USD', budgetAmount: '' });
     } catch (error) {
       console.error('Error uploading files:', error);
       alert(`✗ Error uploading files: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -310,7 +395,8 @@ export default function BrainPage({ onBack }: BrainPageProps) {
   function cancelUpload() {
     setShowUploadModal(false);
     setSelectedFiles([]);
-    setUploadMetadata({ title: '', description: '', category: '', tags: '' });
+    setExtractedTexts(new Map());
+    setUploadMetadata({ title: '', description: '', category: '', tags: '', budgetCurrency: 'USD', budgetAmount: '' });
   }
 
   async function handleSearch() {
@@ -1009,19 +1095,127 @@ export default function BrainPage({ onBack }: BrainPageProps) {
                       Add searchable tags separated by commas
                     </p>
                   </div>
+
+                  {/* Document Content Entry */}
+                  <div className="border border-blue-200 bg-blue-50 rounded-lg p-4">
+                    <h4 className="text-sm font-medium text-gray-900 mb-3">
+                      🤖 Automatic Text Extraction {extracting && <span className="text-blue-600">(Processing...)</span>}
+                    </h4>
+                    
+                    {extracting ? (
+                      <div className="flex items-center gap-2 text-sm text-blue-700 py-4">
+                        <span className="animate-spin">⏳</span>
+                        <span>Extracting text from documents for AI search...</span>
+                      </div>
+                    ) : (
+                      <>
+                        {selectedFiles.map((file, index) => {
+                          const hasExtractedText = extractedTexts.has(file.name);
+                          const extractedText = extractedTexts.get(file.name) || '';
+                          const isPdfOrWord = file.type === 'application/pdf' || 
+                                             file.type.includes('word') || 
+                                             file.name.endsWith('.pdf') || 
+                                             file.name.endsWith('.docx') ||
+                                             file.name.endsWith('.doc');
+                          
+                          return (
+                            <div key={index} className="mb-4 last:mb-0">
+                              <label className="block text-sm font-medium text-gray-700 mb-2">
+                                {file.name}
+                                {hasExtractedText && (
+                                  <span className="ml-2 text-green-600 text-xs font-semibold">
+                                    ✓ {extractedText.length.toLocaleString()} characters extracted
+                                  </span>
+                                )}
+                                {!hasExtractedText && isPdfOrWord && (
+                                  <span className="ml-2 text-yellow-600 text-xs">
+                                    ⚠ Failed to auto-extract - paste text manually
+                                  </span>
+                                )}
+                              </label>
+                              <textarea
+                                value={extractedText}
+                                onChange={(e) => {
+                                  const newMap = new Map(extractedTexts);
+                                  newMap.set(file.name, e.target.value);
+                                  setExtractedTexts(newMap);
+                                }}
+                                rows={6}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+                                placeholder={
+                                  isPdfOrWord
+                                    ? "Text will be extracted automatically, or paste manually if extraction fails..."
+                                    : "Enter document content for AI search..."
+                                }
+                              />
+                              <p className="text-xs text-gray-500 mt-1">
+                                {extractedText.length.toLocaleString()} characters
+                                {extractedText.length === 0 && (
+                                  <span className="ml-2 text-yellow-600 font-medium">
+                                    • Without content, AI cannot search this document
+                                  </span>
+                                )}
+                              </p>
+                            </div>
+                          );
+                        })}
+                        
+                        <div className="mt-3 pt-3 border-t border-blue-200">
+                          <p className="text-xs text-gray-600">
+                            💡 <strong>AI Search:</strong> Text content is automatically extracted from PDF/Word files. 
+                            If extraction fails, copy text from your document (Ctrl+A, Ctrl+C) and paste above.
+                          </p>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Budget
+                    </label>
+                    <div className="flex gap-2">
+                      <select
+                        value={uploadMetadata.budgetCurrency}
+                        onChange={(e) => setUploadMetadata(prev => ({ ...prev, budgetCurrency: e.target.value }))}
+                        className="w-32 px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="USD">USD ($)</option>
+                        <option value="EUR">EUR (€)</option>
+                        <option value="GBP">GBP (£)</option>
+                        <option value="JPY">JPY (¥)</option>
+                        <option value="INR">INR (₹)</option>
+                        <option value="AUD">AUD (A$)</option>
+                        <option value="CAD">CAD (C$)</option>
+                        <option value="CHF">CHF (Fr)</option>
+                      </select>
+                      <input
+                        type="number"
+                        value={uploadMetadata.budgetAmount}
+                        onChange={(e) => setUploadMetadata(prev => ({ ...prev, budgetAmount: e.target.value }))}
+                        className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        placeholder="Enter amount"
+                        min="0"
+                        step="0.01"
+                      />
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Optional: Specify budget for this document/project
+                    </p>
+                  </div>
                 </div>
 
                 <div className="mt-6 flex justify-end gap-3">
                   <button
                     onClick={cancelUpload}
-                    disabled={uploading}
+                    disabled={uploading || extracting}
                     className="px-4 py-2 text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleUploadWithMetadata}
-                    disabled={uploading}
+                    disabled={uploading || extracting}
                     className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
                   >
                     {uploading ? (
@@ -1031,7 +1225,7 @@ export default function BrainPage({ onBack }: BrainPageProps) {
                       </>
                     ) : (
                       <>
-                        ✓ Upload & Generate Embeddings
+                        Upload {selectedFiles.length} File{selectedFiles.length > 1 ? 's' : ''}
                       </>
                     )}
                   </button>
