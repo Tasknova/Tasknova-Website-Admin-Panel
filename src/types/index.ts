@@ -344,3 +344,121 @@ export interface SearchResult {
   metadata?: any
   similarity: number
 }
+
+// =====================================================
+// CONTEXT MEMORY & STANDUP TYPES
+// =====================================================
+
+export interface Insight {
+  type: 'company' | 'project' | 'team'
+  confidence: number
+  text: string
+  keywords: string[]
+  mentioned_projects?: string[]
+  mentioned_company?: string
+  mentioned_people?: string[]
+  mentioned_dates?: string[]
+  category?: 'decision' | 'blocker' | 'update' | 'action_item' | 'risk' | 'opportunity'
+  source_text?: string
+}
+
+export interface Classification {
+  type: 'company' | 'project'
+  project_id?: string
+  confidence: number
+}
+
+export interface DailyStandupMeeting {
+  id: string
+  meeting_date: string
+  meeting_end_time?: string
+  meeting_duration?: number
+  meeting_title?: string
+  meeting_transcript: Record<string, any>
+  meeting_summary?: Record<string, any>
+  memory_context_analysis?: {
+    insights: Insight[]
+  }
+  processed: boolean
+  processed_at?: string
+  processing_error?: string
+  created_at: string
+}
+
+export interface MeetingIntelligence {
+  id: string
+  meeting_id: string
+  tasks_completed?: number
+  tasks_completed_details?: string
+  tasks_delayed?: number
+  tasks_delayed_details?: string
+  blockers_detected?: number
+  blockers_detected_details?: string
+  critical_blockers?: number
+  critical_blockers_details?: string
+  pipeline_deals_progressed?: number
+  pipeline_deals_progressed_details?: string
+  pipeline_deals_stalled?: number
+  pipeline_deals_stalled_details?: string
+  revenue_impact_discussions?: number
+  revenue_impact_discussions_details?: string
+  revenue_risk_signals?: number
+  revenue_risk_signals_details?: string
+  customer_feedback_count?: number
+  customer_feedback_details?: string
+  feature_requests?: number
+  feature_requests_details?: string
+  followups_assigned?: number
+  followups_assigned_details?: string
+  followups_pending?: number
+  followups_pending_details?: string
+  sentiment_score?: number
+  sentiment_reasoning?: string
+  meeting_efficiency_score?: number
+  meeting_efficiency_reasoning?: string
+  key_insights?: string
+  participants_analysis?: any
+  analysis?: any
+  created_at: string
+  updated_at: string
+}
+
+export interface ContextMemoryItem {
+  id: string
+  user_id: string
+  project_id?: string
+  insight_text: string
+  confidence_score: number
+  relevance_score: number
+  keywords: string[]
+  category?: string
+  last_accessed_at: string
+  access_count: number
+  is_pinned: boolean
+  source_insight_id?: string
+  source_meeting_id?: string
+  metadata?: any
+  created_at: string
+  updated_at: string
+}
+
+export interface CompanyContextMemory extends ContextMemoryItem {
+  // Company-specific memory item
+}
+
+export interface ProjectContextMemory extends ContextMemoryItem {
+  project_id: string // Required for project context
+}
+
+export interface ContextEmbedding {
+  id: string
+  user_id: string
+  context_memory_id: string
+  embedding: number[] // 768 dimensions
+  created_at: string
+}
+
+export interface EmbeddingResponse {
+  embedding: number[]
+  error?: string
+}

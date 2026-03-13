@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
+import { Trash2, Pin, PinOff, Eye } from 'lucide-react';
 import { 
   prepareCompanyInfoForEmbedding, 
   storeCompanyBrainWithEmbedding,
@@ -61,7 +62,7 @@ interface BrainPageProps {
 }
 
 export default function BrainPage({ onBack }: BrainPageProps) {
-  const [activeTab, setActiveTab] = useState<'info' | 'documents' | 'search'>('info');
+  const [activeTab, setActiveTab] = useState<'info' | 'documents' | 'context-memory' | 'search'>('info');
   const [loading, setLoading] = useState(false);
   const [userId, setUserId] = useState<string>('');
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -97,6 +98,14 @@ export default function BrainPage({ onBack }: BrainPageProps) {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [extractedTexts, setExtractedTexts] = useState<Map<string, string>>(new Map());
   const [extracting, setExtracting] = useState(false);
+  
+  // Context Memory State
+  const [contextMemories, setContextMemories] = useState<any[]>([]);
+  const [contextLoading, setContextLoading] = useState(false);
+  const [contextFilter, setContextFilter] = useState<'all' | 'pinned'>('all');
+  const [contextSortBy, setContextSortBy] = useState<'recent' | 'accessed' | 'confidence'>('recent');
+  const [selectedContext, setSelectedContext] = useState<any | null>(null);
+  
   const [uploadMetadata, setUploadMetadata] = useState({
     title: '',
     description: '',
@@ -119,6 +128,12 @@ export default function BrainPage({ onBack }: BrainPageProps) {
   useEffect(() => {
     initializeUser();
   }, []);
+  
+  useEffect(() => {
+    if (activeTab === 'context-memory' && userId) {
+      loadContextMemories();
+    }
+  }, [activeTab, contextFilter, contextSortBy, userId]);
 
   useEffect(() => {
     // Auto-scroll to bottom when new messages arrive
@@ -182,6 +197,52 @@ export default function BrainPage({ onBack }: BrainPageProps) {
       setGroups(data || []);
     } catch (error) {
       console.error('Error loading groups:', error);
+    }
+  }
+
+  async function loadContextMemories() {
+    if (!userId) return;
+    setContextLoading(true);
+    try {
+      const params = new URLSearchParams({
+        filter: contextFilter,
+        sort: contextSortBy,
+      });
+      const res = await fetch(`/api/admin/company-context-memory?${params.toString()}`);
+      if (!res.ok) throw new Error('Failed to fetch company context memory');
+      const data = await res.json();
+      setContextMemories(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error('Error loading context memories:', error);
+    } finally {
+      setContextLoading(false);
+    }
+  }
+
+  async function togglePinContext(id: string, isPinned: boolean) {
+    try {
+      const res = await fetch('/api/admin/company-context-memory', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, is_pinned: !isPinned }),
+      });
+      if (!res.ok) throw new Error('Failed to update company context memory');
+      await loadContextMemories();
+    } catch (error) {
+      console.error('Error updating context:', error);
+    }
+  }
+
+  async function deleteContext(id: string) {
+    try {
+      const res = await fetch(`/api/admin/company-context-memory?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error('Failed to delete company context memory');
+      await loadContextMemories();
+      setSelectedContext(null);
+    } catch (error) {
+      console.error('Error deleting context:', error);
     }
   }
 
@@ -399,6 +460,13 @@ export default function BrainPage({ onBack }: BrainPageProps) {
     setUploadMetadata({ title: '', description: '', category: '', tags: '', budgetCurrency: 'USD', budgetAmount: '' });
   }
 
+  function scoreByQueryOverlap(query: string, text: string, keywords?: string[]) {
+    const queryTerms = query.toLowerCase().split(/\W+/).filter(term => term.length > 2);
+    const haystack = `${text} ${(keywords || []).join(' ')}`.toLowerCase();
+    const matches = queryTerms.filter(term => haystack.includes(term)).length;
+    return queryTerms.length ? matches / queryTerms.length : 0;
+  }
+
   async function handleSearch() {
     if (!searchQuery || !userId) return;
 
@@ -416,7 +484,7 @@ export default function BrainPage({ onBack }: BrainPageProps) {
 
     try {
       // Step 1: Search for relevant context using embeddings
-      const context = await searchSimilarContent(
+      const embeddingContext = await searchSimilarContent(
         supabase,
         userId,
         currentQuery,
@@ -424,7 +492,28 @@ export default function BrainPage({ onBack }: BrainPageProps) {
         5 // Get top 5 results
       );
 
-      // Step 2: Generate AI response using RAG
+      // Step 2: Fetch context memory and rank by query overlap
+      const memoryRes = await fetch('/api/admin/company-context-memory?filter=all&sort=recent');
+      const memoryItems = memoryRes.ok ? await memoryRes.json() : [];
+      const rankedMemoryContext = (Array.isArray(memoryItems) ? memoryItems : [])
+        .map((item: any) => ({
+          content_type: 'context_memory',
+          content: item.insight_text,
+          similarity: scoreByQueryOverlap(currentQuery, item.insight_text || '', item.keywords),
+          metadata: {
+            category: item.category,
+            confidence_score: item.confidence_score,
+            keywords: item.keywords,
+            source_meeting_id: item.source_meeting_id,
+          },
+        }))
+        .filter((item: any) => item.similarity > 0)
+        .sort((a: any, b: any) => b.similarity - a.similarity)
+        .slice(0, 3);
+
+      const context = [...embeddingContext, ...rankedMemoryContext];
+
+      // Step 3: Generate AI response using RAG
       const { generateChatResponse } = await import('@/lib/embeddings');
       const { answer, sources, error } = await generateChatResponse(currentQuery, context);
 
@@ -485,6 +574,7 @@ export default function BrainPage({ onBack }: BrainPageProps) {
               {[
                 { id: 'info' as const, label: 'Company Info' },
                 { id: 'documents' as const, label: 'Documents' },
+                { id: 'context-memory' as const, label: 'Context Memory' },
                 { id: 'search' as const, label: '🤖 AI Chat' }
               ].map(tab => (
                 <button
@@ -853,6 +943,100 @@ export default function BrainPage({ onBack }: BrainPageProps) {
                     </div>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* Context Memory Tab */}
+            {activeTab === 'context-memory' && (
+              <div className="space-y-6">
+                {/* Filters and Sorting */}
+                <div className="flex gap-4 items-center">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Filter:</label>
+                    <select
+                      value={contextFilter}
+                      onChange={(e) => setContextFilter(e.target.value as 'all' | 'pinned')}
+                      className="px-3 py-2 border border-gray-300 rounded-md"
+                    >
+                      <option value="all">All Items</option>
+                      <option value="pinned">Pinned Only</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Sort by:</label>
+                    <select
+                      value={contextSortBy}
+                      onChange={(e) => setContextSortBy(e.target.value as 'recent' | 'accessed' | 'confidence')}
+                      className="px-3 py-2 border border-gray-300 rounded-md"
+                    >
+                      <option value="recent">Most Recent</option>
+                      <option value="accessed">Last Accessed</option>
+                      <option value="confidence">Highest Confidence</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Context Memories List */}
+                {contextLoading ? (
+                  <div className="flex justify-center py-8">
+                    <div className="text-gray-500">Loading...</div>
+                  </div>
+                ) : contextMemories.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">
+                    No context memories yet. They'll appear here when meetings are processed.
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {contextMemories.map((memory) => (
+                      <div
+                        key={memory.id}
+                        className="border border-gray-200 rounded-lg p-4 hover:border-blue-300 transition-colors"
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1 cursor-pointer" onClick={() => setSelectedContext(memory)}>
+                            <div className="flex items-center gap-2 mb-2">
+                              {memory.is_pinned && <Pin className="w-4 h-4 text-yellow-500" />}
+                              <div className="flex gap-2">
+                                <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded font-medium">
+                                  {(memory.confidence_score * 100).toFixed(0)}% confidence
+                                </span>
+                                <span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded font-medium">
+                                  {memory.access_count} accessed
+                                </span>
+                              </div>
+                            </div>
+                            <p className="text-gray-900 font-medium line-clamp-2">{memory.insight_text}</p>
+                            {memory.keywords && memory.keywords.length > 0 && (
+                              <div className="flex gap-1 mt-2 flex-wrap">
+                                {memory.keywords.slice(0, 3).map((keyword: string, idx: number) => (
+                                  <span key={idx} className="text-xs bg-gray-100 px-2 py-1 rounded">
+                                    #{keyword}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex gap-2 ml-4">
+                            <button
+                              onClick={() => togglePinContext(memory.id, memory.is_pinned)}
+                              className="p-2 text-gray-400 hover:text-yellow-500 transition-colors"
+                              title={memory.is_pinned ? 'Unpin' : 'Pin'}
+                            >
+                              {memory.is_pinned ? <PinOff className="w-5 h-5" /> : <Pin className="w-5 h-5" />}
+                            </button>
+                            <button
+                              onClick={() => deleteContext(memory.id)}
+                              className="p-2 text-gray-400 hover:text-red-500 transition-colors"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-5 h-5" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 

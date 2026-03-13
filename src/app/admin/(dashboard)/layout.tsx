@@ -1,5 +1,4 @@
 'use client'
-
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
@@ -18,7 +17,9 @@ import {
   Menu,
   X,
   Brain,
-  FolderKanban
+  FolderKanban,
+  ClipboardList,
+  BrainCircuit
 } from 'lucide-react'
 import { useState } from 'react'
 import toast from 'react-hot-toast'
@@ -35,6 +36,8 @@ const navigation = [
   { name: 'Industry Reports', href: '/admin/industry-reports', icon: FileCheck },
   { name: 'Company Brain', href: '/admin/company-brain', icon: Brain },
   { name: 'Project Brain', href: '/admin/project-brain', icon: FolderKanban },
+  { name: 'Daily Standup Meetings', href: '/admin/daily-standup-meetings', icon: ClipboardList },
+  { name: 'Meetings Intelligence', href: '/admin/meetings-intelligence', icon: BrainCircuit },
   { name: 'Admins', href: '/admin/admins', icon: Shield },
 ]
 
@@ -65,17 +68,17 @@ export default function AdminLayout({
         <div className="flex flex-col flex-grow pt-5 pb-4 overflow-y-auto">
           <div className="flex items-center flex-shrink-0 px-4 mb-8">
             <div className="flex items-center gap-3">
-              <Image 
-                src="/tasknova-logo-2.png" 
-                alt="Tasknova Logo" 
-                width={180} 
+              <Image
+                src="/tasknova-logo-2.png"
+                alt="Tasknova Logo"
+                width={180}
                 height={40}
                 className="h-10 w-auto"
                 priority
               />
             </div>
           </div>
-          
+
           <nav className="flex-1 px-3 space-y-1">
             {navigation.map((item) => {
               const isActive = pathname === item.href
@@ -85,8 +88,8 @@ export default function AdminLayout({
                   href={item.href}
                   className={`
                     group flex items-center px-3 py-3 text-sm font-medium rounded-xl transition-all duration-300
-                    ${isActive 
-                      ? 'bg-gradient-to-r from-primary-500 to-purple-500 text-white shadow-lg transform scale-105' 
+                    ${isActive
+                      ? 'bg-gradient-to-r from-primary-500 to-purple-500 text-white shadow-lg transform scale-105'
                       : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
                     }
                   `}
@@ -114,10 +117,10 @@ export default function AdminLayout({
       <div className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-white border-b border-gray-200 px-4 py-3 shadow-lg">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Image 
-              src="/tasknova-logo-2.png" 
-              alt="Tasknova Logo" 
-              width={140} 
+            <Image
+              src="/tasknova-logo-2.png"
+              alt="Tasknova Logo"
+              width={140}
               height={32}
               className="h-8 w-auto"
               priority
@@ -145,8 +148,8 @@ export default function AdminLayout({
                   onClick={() => setMobileMenuOpen(false)}
                   className={`
                     flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-300
-                    ${isActive 
-                      ? 'bg-gradient-to-r from-primary-500 to-purple-500 text-white shadow-lg' 
+                    ${isActive
+                      ? 'bg-gradient-to-r from-primary-500 to-purple-500 text-white shadow-lg'
                       : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
                     }
                   `}
@@ -179,3 +182,4 @@ export default function AdminLayout({
     </div>
   )
 }
+
