@@ -33,13 +33,16 @@ export async function classifyInsight(
     ) {
       // Find project by name in database
       const projectName = insight.mentioned_projects[0]
-      const { data: project } = await supabase
+      const { data: project, error: projectLookupError } = await supabase
         .from('projects')
         .select('id')
         .eq('project_name', projectName)
         .eq('company_id', userId)
-        .single()
-        .catch(() => ({ data: null }))
+        .maybeSingle()
+
+      if (projectLookupError) {
+        console.warn('Project lookup failed during classification:', projectLookupError)
+      }
 
       if (project?.id) {
         return {
@@ -463,22 +466,21 @@ export async function getContextMemoryStats(
   last_updated: string | null
 }> {
   try {
-    const { data: companyData, error: companyError } = await supabase
+    const { count: companyCount } = await supabase
       .from('company_context_memory')
       .select('*', { count: 'exact', head: true })
       .eq('user_id', userId)
 
-    const { data: projectData, error: projectError } = await supabase
+    const { count: projectCount } = await supabase
       .from('project_context_memory')
       .select('*', { count: 'exact', head: true })
       .eq('user_id', userId)
 
-    const { data: pinnedData } = await supabase
+    const { count: pinnedCount } = await supabase
       .from('company_context_memory')
-      .select('id')
+      .select('*', { count: 'exact', head: true })
       .eq('user_id', userId)
       .eq('is_pinned', true)
-      .limit(1)
 
     const { data: latestMeeting } = await supabase
       .from('daily_standup_meetings')
@@ -489,9 +491,9 @@ export async function getContextMemoryStats(
       .single()
 
     return {
-      company_count: companyData ? companyData.count || 0 : 0,
-      project_count: projectData ? projectData.count || 0 : 0,
-      total_pinned: pinnedData ? pinnedData.length : 0,
+      company_count: companyCount || 0,
+      project_count: projectCount || 0,
+      total_pinned: pinnedCount || 0,
       last_updated: latestMeeting?.created_at || null,
     }
   } catch (error) {
