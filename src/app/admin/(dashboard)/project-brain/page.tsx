@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
@@ -21,7 +21,7 @@ export default function ProjectBrainAdminPage() {
   const [projects, setProjects] = useState<Project[]>([])
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [currentAdmin, setCurrentAdmin] = useState<any>(null)
+  const [currentAdmin, setCurrentAdmin] = useState<Record<string, unknown> | null>(null)
   const [showNewProjectForm, setShowNewProjectForm] = useState(false)
   const [newProject, setNewProject] = useState({
     project_name: '',
@@ -144,9 +144,10 @@ export default function ProjectBrainAdminPage() {
       setNewProject({ project_name: '', description: '', start_date: '', end_date: '' })
       setIsNeverEnding(false)
       setSelectedProjectId(data.id)
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error creating project:', error)
-      toast.error(`Failed to create project: ${error.message || 'Unknown error'}`)
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      toast.error(`Failed to create project: ${message}`)
     } finally {
       setLoading(false)
     }
@@ -165,9 +166,10 @@ export default function ProjectBrainAdminPage() {
       toast.success('Project deleted successfully!')
       setProjects(projects.filter(p => p.id !== projectId))
       setDeleteConfirmId(null)
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error deleting project:', error)
-      toast.error(`Failed to delete project: ${error.message || 'Unknown error'}`)
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      toast.error(`Failed to delete project: ${message}`)
     } finally {
       setLoading(false)
     }
@@ -222,9 +224,10 @@ export default function ProjectBrainAdminPage() {
       setProjects(projects.map(p => p.id === editingProject.id ? data : p))
       setEditingProject(null)
       setEditIsNeverEnding(false)
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error updating project:', error)
-      toast.error(`Failed to update project: ${error.message || 'Unknown error'}`)
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      toast.error(`Failed to update project: ${message}`)
     } finally {
       setLoading(false)
     }
@@ -244,9 +247,10 @@ export default function ProjectBrainAdminPage() {
 
       toast.success('Project marked as completed!')
       setProjects(projects.map(p => p.id === projectId ? data : p))
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error marking project as complete:', error)
-      toast.error(`Failed to mark project as complete: ${error.message || 'Unknown error'}`)
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      toast.error(`Failed to mark project as complete: ${message}`)
     } finally {
       setLoading(false)
     }
@@ -611,4 +615,5 @@ export default function ProjectBrainAdminPage() {
     </div>
   )
 }
+
 

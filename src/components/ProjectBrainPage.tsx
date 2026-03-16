@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import { Trash2, Pin, PinOff } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import {
-  prepareProjectMetadataForEmbedding,
   storeProjectMetadataWithEmbedding,
   generateDocumentEmbeddingClientSide,
   searchProjectContent,
@@ -56,7 +55,18 @@ async function extractTextFromFile(file: File): Promise<{ success: boolean; text
     };
   }
 }
-import type { Project, ProjectMetadata, ProjectDocument } from '@/types';
+import type { Project, ProjectMetadata, ProjectDocument, ProjectContextMemory } from '@/types';
+
+interface ChatSource {
+  content_type?: string;
+  content: string;
+  similarity: number;
+  metadata?: {
+    file_name?: string;
+    category?: string;
+    [key: string]: unknown;
+  };
+}
 
 interface ProjectBrainPageProps {
   projectId: string;
@@ -101,11 +111,11 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   
   // Context Memory State
-  const [contextMemories, setContextMemories] = useState<any[]>([]);
+  const [contextMemories, setContextMemories] = useState<ProjectContextMemory[]>([]);
   const [contextLoading, setContextLoading] = useState(false);
   const [contextFilter, setContextFilter] = useState<'all' | 'pinned'>('all');
   const [contextSortBy, setContextSortBy] = useState<'recent' | 'accessed' | 'confidence'>('recent');
-  const [selectedContext, setSelectedContext] = useState<any | null>(null);
+  const [, setSelectedContext] = useState<ProjectContextMemory | null>(null);
   
   const [uploadMetadata, setUploadMetadata] = useState({
     title: '',
@@ -119,7 +129,7 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
   const [chatMessages, setChatMessages] = useState<Array<{
     role: 'user' | 'assistant';
     content: string;
-    sources?: any[];
+    sources?: ChatSource[];
     timestamp: Date;
   }>>([]);
   const [searching, setSearching] = useState(false);
@@ -146,7 +156,7 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
         setUserId(data.admin.id);
         await loadProject();
         await loadMetadata();
-        await loadDocuments(data.admin.id);
+        await loadDocuments();
       }
     } catch (error) {
       console.error('Failed to fetch session:', error);
@@ -183,7 +193,7 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
     }
   }
 
-  async function loadDocuments(uid: string) {
+  async function loadDocuments() {
     try {
       const { data, error } = await supabase
         .from('project_documents')
@@ -322,7 +332,7 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
 
     setUploading(true);
     try {
-      const uploadedDocs: any[] = [];
+      const uploadedDocs: ProjectDocument[] = [];
 
       for (const file of selectedFiles) {
         // Sanitize filename - remove special characters, replace spaces with underscores
@@ -409,7 +419,7 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
       }
 
       alert(`✓ Successfully uploaded ${uploadedDocs.length} document${uploadedDocs.length > 1 ? 's' : ''}!`);
-      await loadDocuments(userId);
+      await loadDocuments();
       
       // Reset modal
       setShowUploadModal(false);
@@ -490,7 +500,7 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
       if (deleteError) throw deleteError;
 
       alert('✓ Successfully deleted document!');
-      await loadDocuments(userId);
+      await loadDocuments();
       
     } catch (error) {
       console.error('Error deleting document:', error);
@@ -543,7 +553,7 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
 
   function startEditingContent(doc: ProjectDocument) {
     setEditingDocId(doc.id!);
-    setEditContentText((doc as any).content_text || '');
+    setEditContentText(doc.content_text || '');
   }
 
   async function saveDocumentContent() {
@@ -569,7 +579,7 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
       alert('✓ Content updated and embedding regenerated!');
       setEditingDocId(null);
       setEditContentText('');
-      await loadDocuments(userId);
+      await loadDocuments();
     } catch (error) {
       console.error('Error saving content:', error);
       alert(`✗ Error: ${error instanceof Error ? error.message : 'Failed to save content'}`);
@@ -618,8 +628,8 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
       });
       const memoryRes = await fetch(`/api/admin/project-context-memory?${params.toString()}`);
       const memoryItems = memoryRes.ok ? await memoryRes.json() : [];
-      const rankedMemoryContext = (Array.isArray(memoryItems) ? memoryItems : [])
-        .map((item: any) => ({
+      const rankedMemoryContext: ChatSource[] = (Array.isArray(memoryItems) ? memoryItems : [])
+        .map((item: ProjectContextMemory) => ({
           content_type: 'context_memory',
           content: item.insight_text,
           similarity: scoreByQueryOverlap(userMessage.content, item.insight_text || '', item.keywords),
@@ -630,16 +640,22 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
             source_meeting_id: item.source_meeting_id,
           },
         }))
-        .filter((item: any) => item.similarity > 0)
-        .sort((a: any, b: any) => b.similarity - a.similarity)
+        .filter((item: ChatSource) => item.similarity > 0)
+        .sort((a: ChatSource, b: ChatSource) => b.similarity - a.similarity)
         .slice(0, 3);
 
       const searchResults = [...embeddingResults, ...rankedMemoryContext];
+      const chatContext = searchResults.map((item) => ({
+        content: item.content,
+        similarity: item.similarity,
+        content_type: item.content_type,
+        metadata: item.metadata ? JSON.stringify(item.metadata) : undefined,
+      }));
 
       // Generate AI response using RAG
-      const { answer, sources, error } = await generateProjectChatResponse(
+      const { answer, error } = await generateProjectChatResponse(
         userMessage.content,
-        searchResults
+        chatContext
       );
 
       if (error) {
@@ -650,7 +666,7 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
       const assistantMessage = {
         role: 'assistant' as const,
         content: answer || 'I apologize, but I encountered an error generating a response.',
-        sources: sources,
+        sources: searchResults,
         timestamp: new Date()
       };
       setChatMessages(prev => [...prev, assistantMessage]);
@@ -880,7 +896,7 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
                   </label>
                   <select
                     value={metadata.priority_level || 'medium'}
-                    onChange={(e) => setMetadata(prev => ({ ...prev, priority_level: e.target.value as any }))}
+                    onChange={(e) => setMetadata(prev => ({ ...prev, priority_level: e.target.value as ProjectMetadata['priority_level'] }))}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   >
                     <option value="low">Low</option>
@@ -1184,21 +1200,21 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
                                   ))}
                                 </div>
                               )}
-                              {(doc as any).content_text && (
+                              {doc.content_text && (
                                 <div className="mt-2">
                                   <details className="text-sm">
                                     <summary className="cursor-pointer text-gray-500 hover:text-gray-700">
-                                      📄 Document Content ({(doc as any).content_text.length} characters)
+                                      📄 Document Content ({doc.content_text.length} characters)
                                     </summary>
                                     <div className="mt-2 p-3 bg-gray-50 rounded text-xs text-gray-600 max-h-40 overflow-y-auto font-mono whitespace-pre-wrap">
-                                      {(doc as any).content_text}
+                                      {doc.content_text}
                                     </div>
                                   </details>
                                 </div>
                               )}
-                              {!(doc as any).content_text && (
+                              {!doc.content_text && (
                                 <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-800">
-                                  ⚠️ No content text - AI cannot search this document. Click "Add Content" to fix.
+                                  ⚠️ No content text - AI cannot search this document. Click &quot;Add Content&quot; to fix.
                                 </div>
                               )}
                             </div>
@@ -1209,7 +1225,7 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
                                 title="Add/Edit document content for AI"
                               >
                                 <span>✏️</span>
-                                <span className="text-xs">{(doc as any).content_text ? 'Edit' : 'Add'} Content</span>
+                                <span className="text-xs">{doc.content_text ? 'Edit' : 'Add'} Content</span>
                               </button>
                               <button
                                 onClick={() => regenerateDocumentEmbedding(doc.id!)}
@@ -1344,7 +1360,7 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
                   </div>
                 ) : contextMemories.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
-                    No context memories yet. They'll appear here when meetings are processed.
+                    No context memories yet. They&apos;ll appear here when meetings are processed.
                   </div>
                 ) : (
                   <div className="space-y-4">
@@ -1420,7 +1436,7 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
                         Start a conversation by asking about your project
                       </p>
                       <p className="text-xs text-center mt-2">
-                        Example: "What are the technical requirements?" or "What's the project timeline?"
+                        Example: &quot;What are the technical requirements?&quot; or &quot;What&apos;s the project timeline?&quot;
                       </p>
                     </div>
                   ) : (
@@ -1588,3 +1604,5 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
     </div>
   );
 }
+
+

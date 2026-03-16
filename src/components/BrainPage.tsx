@@ -1,13 +1,23 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Trash2, Pin, PinOff, Eye } from 'lucide-react';
-import { 
-  prepareCompanyInfoForEmbedding, 
+import { Trash2, Pin, PinOff } from 'lucide-react';
+import {
   storeCompanyBrainWithEmbedding,
   storeAdditionalContext,
   searchSimilarContent
 } from '@/lib/embeddings';
-import type { CompanyBrain, BrainDocument, DocumentGroup } from '@/types';
+import type { CompanyBrain, BrainDocument, CompanyContextMemory, DocumentGroup } from '@/types';
+
+interface ChatSource {
+  content_type?: string;
+  content: string;
+  similarity: number;
+  metadata?: {
+    file_name?: string;
+    category?: string;
+    [key: string]: unknown;
+  };
+}
 
 // Automatic text extraction function via API
 async function extractTextFromFile(file: File): Promise<{ success: boolean; text: string | null; message?: string }> {
@@ -92,7 +102,7 @@ export default function BrainPage({ onBack }: BrainPageProps) {
   
   // Documents State
   const [documents, setDocuments] = useState<BrainDocument[]>([]);
-  const [groups, setGroups] = useState<DocumentGroup[]>([]);
+  const [, setGroups] = useState<DocumentGroup[]>([]);
   const [uploading, setUploading] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -100,11 +110,10 @@ export default function BrainPage({ onBack }: BrainPageProps) {
   const [extracting, setExtracting] = useState(false);
   
   // Context Memory State
-  const [contextMemories, setContextMemories] = useState<any[]>([]);
+  const [contextMemories, setContextMemories] = useState<CompanyContextMemory[]>([]);
   const [contextLoading, setContextLoading] = useState(false);
   const [contextFilter, setContextFilter] = useState<'all' | 'pinned'>('all');
   const [contextSortBy, setContextSortBy] = useState<'recent' | 'accessed' | 'confidence'>('recent');
-  const [selectedContext, setSelectedContext] = useState<any | null>(null);
   
   const [uploadMetadata, setUploadMetadata] = useState({
     title: '',
@@ -120,7 +129,7 @@ export default function BrainPage({ onBack }: BrainPageProps) {
   const [chatMessages, setChatMessages] = useState<Array<{
     role: 'user' | 'assistant';
     content: string;
-    sources?: any[];
+    sources?: ChatSource[];
     timestamp: Date;
   }>>([]);
   const [searching, setSearching] = useState(false);
@@ -240,7 +249,6 @@ export default function BrainPage({ onBack }: BrainPageProps) {
       });
       if (!res.ok) throw new Error('Failed to delete company context memory');
       await loadContextMemories();
-      setSelectedContext(null);
     } catch (error) {
       console.error('Error deleting context:', error);
     }
@@ -495,8 +503,8 @@ export default function BrainPage({ onBack }: BrainPageProps) {
       // Step 2: Fetch context memory and rank by query overlap
       const memoryRes = await fetch('/api/admin/company-context-memory?filter=all&sort=recent');
       const memoryItems = memoryRes.ok ? await memoryRes.json() : [];
-      const rankedMemoryContext = (Array.isArray(memoryItems) ? memoryItems : [])
-        .map((item: any) => ({
+      const rankedMemoryContext: ChatSource[] = (Array.isArray(memoryItems) ? memoryItems : [])
+        .map((item: CompanyContextMemory) => ({
           content_type: 'context_memory',
           content: item.insight_text,
           similarity: scoreByQueryOverlap(currentQuery, item.insight_text || '', item.keywords),
@@ -507,15 +515,21 @@ export default function BrainPage({ onBack }: BrainPageProps) {
             source_meeting_id: item.source_meeting_id,
           },
         }))
-        .filter((item: any) => item.similarity > 0)
-        .sort((a: any, b: any) => b.similarity - a.similarity)
+        .filter((item: ChatSource) => item.similarity > 0)
+        .sort((a: ChatSource, b: ChatSource) => b.similarity - a.similarity)
         .slice(0, 3);
 
       const context = [...embeddingContext, ...rankedMemoryContext];
+      const chatContext = context.map((item) => ({
+        content: item.content,
+        similarity: String(item.similarity),
+        content_type: String(item.content_type ?? ''),
+        metadata: item.metadata ? JSON.stringify(item.metadata) : '',
+      }));
 
       // Step 3: Generate AI response using RAG
       const { generateChatResponse } = await import('@/lib/embeddings');
-      const { answer, sources, error } = await generateChatResponse(currentQuery, context);
+      const { answer, error } = await generateChatResponse(currentQuery, chatContext);
 
       if (error) {
         throw new Error(error);
@@ -525,7 +539,7 @@ export default function BrainPage({ onBack }: BrainPageProps) {
       const assistantMessage = {
         role: 'assistant' as const,
         content: answer,
-        sources: sources,
+        sources: context,
         timestamp: new Date()
       };
       setChatMessages(prev => [...prev, assistantMessage]);
@@ -983,7 +997,7 @@ export default function BrainPage({ onBack }: BrainPageProps) {
                   </div>
                 ) : contextMemories.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
-                    No context memories yet. They'll appear here when meetings are processed.
+                    No context memories yet. They&apos;ll appear here when meetings are processed.
                   </div>
                 ) : (
                   <div className="space-y-4">
@@ -993,7 +1007,7 @@ export default function BrainPage({ onBack }: BrainPageProps) {
                         className="border border-gray-200 rounded-lg p-4 hover:border-blue-300 transition-colors"
                       >
                         <div className="flex items-start justify-between">
-                          <div className="flex-1 cursor-pointer" onClick={() => setSelectedContext(memory)}>
+                          <div className="flex-1">
                             <div className="flex items-center gap-2 mb-2">
                               {memory.is_pinned && <Pin className="w-4 h-4 text-yellow-500" />}
                               <div className="flex gap-2">
@@ -1047,7 +1061,7 @@ export default function BrainPage({ onBack }: BrainPageProps) {
                 <div className="mb-4">
                   <h3 className="text-lg font-semibold text-gray-900">🤖 AI Assistant</h3>
                   <p className="text-sm text-gray-500 mt-1">
-                    Ask questions about your company and I'll answer using your knowledge base
+                    Ask questions about your company and I&apos;ll answer using your knowledge base
                   </p>
                 </div>
 
@@ -1060,7 +1074,7 @@ export default function BrainPage({ onBack }: BrainPageProps) {
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
                         </svg>
                         <p className="text-sm">Start a conversation by asking a question</p>
-                        <p className="text-xs mt-2">Example: "What is our mission statement?"</p>
+                        <p className="text-xs mt-2">Example: &quot;What is our mission statement?&quot;</p>
                       </div>
                     </div>
                   ) : (
@@ -1422,3 +1436,5 @@ export default function BrainPage({ onBack }: BrainPageProps) {
     </div>
   );
 }
+
+

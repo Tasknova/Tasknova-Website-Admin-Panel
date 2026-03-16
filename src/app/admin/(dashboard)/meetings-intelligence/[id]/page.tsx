@@ -93,7 +93,7 @@ export default function MeetingsIntelligenceDetailPage() {
 
         const data = await res.json()
         setRow(data)
-      } catch (error) {
+      } catch {
         toast.error('Failed to fetch meeting intelligence details')
       } finally {
         setLoading(false)

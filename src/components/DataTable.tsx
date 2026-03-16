@@ -2,25 +2,24 @@
 
 import { useState } from 'react'
 import { Search, Edit, Trash2, Eye } from 'lucide-react'
-import { formatDate } from '@/lib/utils'
 
-interface Column {
+interface Column<T> {
   key: string
   label: string
-  render?: (value: any, row: any) => React.ReactNode
+  render?(value: unknown, row: T): React.ReactNode
 }
 
-interface DataTableProps {
-  data: any[]
-  columns: Column[]
-  onView?: (row: any) => void
-  onEdit?: (row: any) => void
-  onDelete?: (row: any) => void
+interface DataTableProps<T> {
+  data: T[]
+  columns: Column<T>[]
+  onView?: (row: T) => void
+  onEdit?: (row: T) => void
+  onDelete?: (row: T) => void
   searchable?: boolean
   searchKeys?: string[]
 }
 
-export default function DataTable({
+export default function DataTable<T extends { id?: string | number }>({
   data,
   columns,
   onView,
@@ -28,16 +27,17 @@ export default function DataTable({
   onDelete,
   searchable = true,
   searchKeys = []
-}: DataTableProps) {
+}: DataTableProps<T>) {
   const [searchQuery, setSearchQuery] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 10
 
   const filteredData = searchable && searchQuery
     ? data.filter((row) =>
-        searchKeys.some((key) =>
-          String(row[key]).toLowerCase().includes(searchQuery.toLowerCase())
-        )
+        searchKeys.some((key) => {
+          const value = (row as Record<string, unknown>)[key]
+          return String(value ?? '').toLowerCase().includes(searchQuery.toLowerCase())
+        })
       )
     : data
 
@@ -101,7 +101,10 @@ export default function DataTable({
                   <tr key={row.id || index} className="hover:bg-gradient-to-r hover:from-primary-50 hover:to-purple-50 transition-colors duration-200">
                     {columns.map((column) => (
                       <td key={column.key} className="px-6 py-4 text-sm text-gray-900">
-                        {column.render ? column.render(row[column.key], row) : row[column.key] || '-'}
+                        {(() => {
+                          const value = (row as Record<string, unknown>)[column.key]
+                          return column.render ? column.render(value, row) : String(value ?? '-')
+                        })()}
                       </td>
                     ))}
                     {(onView || onEdit || onDelete) && (

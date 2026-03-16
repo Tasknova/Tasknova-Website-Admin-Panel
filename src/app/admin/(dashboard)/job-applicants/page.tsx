@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useState } from 'react'
 import DataTable from '@/components/DataTable'
@@ -28,7 +28,7 @@ export default function JobApplicantsPage() {
       const res = await fetch('/api/admin/job-applicants')
       const data = await res.json()
       setApplicants(data)
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to fetch job applicants')
     } finally {
       setLoading(false)
@@ -50,7 +50,7 @@ export default function JobApplicantsPage() {
       setDeleteModalOpen(false)
       setSelectedApplicant(null)
       fetchApplicants()
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to delete applicant')
     } finally {
       setDeleteLoading(false)
@@ -122,7 +122,7 @@ export default function JobApplicantsPage() {
             <p className="text-3xl font-bold mt-1">{applicants.length}</p>
           </div>
           <div className="bg-white/20 backdrop-blur-sm rounded-lg p-4">
-            <p className="text-purple-100 text-xs font-semibold uppercase">High Score (≥80)</p>
+            <p className="text-purple-100 text-xs font-semibold uppercase">High Score (â‰¥80)</p>
             <p className="text-3xl font-bold mt-1">{applicants.filter(a => a.ai_score >= 80).length}</p>
           </div>
           <div className="bg-white/20 backdrop-blur-sm rounded-lg p-4">
@@ -143,7 +143,7 @@ export default function JobApplicantsPage() {
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
             >
               <option value="all">All Applicants</option>
-              <option value="high">High Score (≥80)</option>
+              <option value="high">High Score (â‰¥80)</option>
               <option value="medium">Medium Score (60-79)</option>
               <option value="low">Low Score (&lt;60)</option>
             </select>
@@ -300,3 +300,5 @@ export default function JobApplicantsPage() {
     </div>
   )
 }
+
+

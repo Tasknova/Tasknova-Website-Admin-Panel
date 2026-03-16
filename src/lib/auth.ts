@@ -39,7 +39,7 @@ export async function verifySession(token: string): Promise<AdminSession | null>
   try {
     const verified = await jwtVerify(token, JWT_SECRET)
     return verified.payload as unknown as AdminSession
-  } catch (err) {
+  } catch {
     return null
   }
 }

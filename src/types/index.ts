@@ -18,7 +18,7 @@ export interface DemoRequest {
   team_size: string
   notes: string
   company_website: string
-  company_scraped_info: any
+  company_scraped_info: Record<string, unknown>
   preferred_date: string
   preferred_time: string
   timezone: string
@@ -52,11 +52,11 @@ export interface JobApplicant {
   resume_url: string
   cover_letter: string
   linkedin_url: string
-  linkedin_scraped_data: any
-  portfolio_scraped_data: any
+  linkedin_scraped_data: Record<string, unknown>
+  portfolio_scraped_data: Record<string, unknown>
   ai_score: number
   ai_score_reasoning: string
-  answers: any
+  answers: Record<string, unknown>
   created_at: string
 }
 
@@ -121,17 +121,17 @@ export interface VoiceConversation {
   ended_reason: string
   duration_seconds: number
   cost: number
-  cost_breakdown: any
+  cost_breakdown: Record<string, unknown>
   transcript: string
   summary: string
-  messages: any
+  messages: Record<string, unknown>
   recording_url: string
   stereo_recording_url: string
   web_call_url: string
-  analysis: any
-  artifact: any
-  transport: any
-  monitor: any
+  analysis: Record<string, unknown>
+  artifact: Record<string, unknown>
+  transport: Record<string, unknown>
+  monitor: Record<string, unknown>
   customer_name: string
   customer_email: string
   customer_phone: string
@@ -145,9 +145,9 @@ export interface ChatConversation {
   agent_id: string
   session_id: string
   user_id: string
-  messages: any
+  messages: Record<string, unknown>
   summary: string
-  metadata: any
+  metadata: Record<string, unknown>
   created_at: string
 }
 
@@ -188,16 +188,16 @@ export interface CompanyBrain {
   unique_selling_points?: string[]
   // Business Information
   target_audience?: string
-  products_services?: any
+  products_services?: Record<string, unknown>
   pricing_model?: string
   key_features?: string[]
   // Team Information
   founder_info?: string
-  leadership_team?: any
+  leadership_team?: Record<string, unknown>
   team_size_details?: string
   // Additional Data
   additional_context?: string
-  custom_fields?: any
+  custom_fields?: Record<string, unknown>
   // Timestamps
   created_at: string
   updated_at: string
@@ -243,7 +243,7 @@ export interface CompanyBrainEmbedding {
   content_id?: string
   content: string
   embedding: number[] // 768 dimensions
-  metadata?: any
+  metadata?: Record<string, unknown>
   created_at: string
   updated_at: string
 }
@@ -276,7 +276,7 @@ export interface ProjectMetadata {
   requirements?: string
   // Planning Information
   key_goals?: string[]
-  milestones?: any
+  milestones?: Record<string, unknown>
   team_size?: number
   budget_currency?: string
   budget_amount?: number
@@ -284,7 +284,7 @@ export interface ProjectMetadata {
   priority_level?: 'low' | 'medium' | 'high' | 'critical'
   pricing_information?: string
   // Additional Data
-  custom_fields?: any
+  custom_fields?: Record<string, unknown>
   additional_context?: string
   // Timestamps
   created_at: string
@@ -328,7 +328,7 @@ export interface ProjectEmbedding {
   content_id?: string
   content: string
   embedding: number[] // 768 dimensions
-  metadata?: any
+  metadata?: Record<string, unknown>
   created_at: string
   updated_at: string
 }
@@ -341,7 +341,7 @@ export interface SearchResult {
   content_type: string
   content_id?: string
   content: string
-  metadata?: any
+  metadata?: Record<string, unknown>
   similarity: number
 }
 
@@ -374,8 +374,8 @@ export interface DailyStandupMeeting {
   meeting_end_time?: string
   meeting_duration?: number
   meeting_title?: string
-  meeting_transcript: Record<string, any>
-  meeting_summary?: Record<string, any>
+  meeting_transcript: Record<string, unknown>
+  meeting_summary?: Record<string, unknown>
   memory_context_analysis?: {
     insights: Insight[]
   }
@@ -417,8 +417,8 @@ export interface MeetingIntelligence {
   meeting_efficiency_score?: number
   meeting_efficiency_reasoning?: string
   key_insights?: string
-  participants_analysis?: any
-  analysis?: any
+  participants_analysis?: Record<string, unknown>
+  analysis?: Record<string, unknown>
   created_at: string
   updated_at: string
 }
@@ -437,14 +437,12 @@ export interface ContextMemoryItem {
   is_pinned: boolean
   source_insight_id?: string
   source_meeting_id?: string
-  metadata?: any
+  metadata?: Record<string, unknown>
   created_at: string
   updated_at: string
 }
 
-export interface CompanyContextMemory extends ContextMemoryItem {
-  // Company-specific memory item
-}
+export type CompanyContextMemory = ContextMemoryItem;
 
 export interface ProjectContextMemory extends ContextMemoryItem {
   project_id: string // Required for project context

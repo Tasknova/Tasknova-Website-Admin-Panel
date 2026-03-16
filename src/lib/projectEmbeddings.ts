@@ -14,15 +14,24 @@ export interface ProjectMetadata {
   tech_stack?: string[];
   requirements?: string;
   key_goals?: string[];
-  milestones?: any;
+  milestones?: Record<string, unknown>;
   team_size?: number;
   budget_currency?: string;
   budget_amount?: number;
   priority_level?: string;
   pricing_information?: string;
-  custom_fields?: Record<string, any>;
+  custom_fields?: Record<string, unknown>;
   additional_context?: string;
-  [key: string]: any;
+}
+
+interface DocumentInfo {
+  file_name?: string;
+  description?: string;
+  category?: string;
+  tags?: string[];
+  file_type?: string;
+  content_text?: string;
+  [key: string]: string | string[] | undefined;
 }
 
 /**
@@ -58,7 +67,7 @@ export interface ProjectEmbeddingData {
   contentType: 'project_metadata' | 'document' | 'document_chunk';
   contentId?: string;
   content: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, string | number | boolean>;
   embedding?: number[];
 }
 
@@ -114,7 +123,7 @@ export async function storeProjectEmbedding(
  * @param projectName - Project name
  * @returns Formatted text for embedding
  */
-function prepareDocumentForEmbedding(doc: any, projectName: string): string {
+function prepareDocumentForEmbedding(doc: DocumentInfo, projectName: string): string {
   const parts = [];
 
   if (projectName) parts.push(`Project: ${projectName}`);
@@ -295,7 +304,7 @@ export async function generateProjectDocumentEmbedding(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     // Call edge function to generate embedding
-    const { data, error } = await supabase.functions.invoke('generate-project-embedding', {
+    const { error } = await supabase.functions.invoke('generate-project-embedding', {
       body: {
         type: 'document',
         project_id: projectId,
@@ -329,7 +338,7 @@ export async function generateProjectMetadataEmbedding(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     // Call edge function to generate embedding
-    const { data, error } = await supabase.functions.invoke('generate-project-embedding', {
+    const { error } = await supabase.functions.invoke('generate-project-embedding', {
       body: {
         type: 'metadata',
         project_id: projectId,
@@ -348,8 +357,15 @@ export async function generateProjectMetadataEmbedding(
   }
 }
 
+interface ProjectSearchResult {
+  content: string;
+  similarity: number;
+  content_type?: string;
+  [key: string]: string | number | undefined;
+}
+
 /**
- * Search project content using semantic search
+ * Search project content by semantic similarity
  * @param supabase - Supabase client
  * @param projectId - Project ID
  * @param query - Natural language query
@@ -363,7 +379,7 @@ export async function searchProjectContent(
   query: string,
   threshold: number = 0.78,
   limit: number = 10
-): Promise<any[]> {
+): Promise<ProjectSearchResult[]> {
   try {
     // Always fetch project metadata first to ensure basic project info is available
     const { data: metadataData, error: metadataError } = await supabase
@@ -398,12 +414,12 @@ export async function searchProjectContent(
     if (error) throw error;
     
     // Combine metadata with search results, ensuring metadata is first and no duplicates
-    const results = data || [];
-    const metadata = metadataData?.[0];
+    const results = (data || []) as ProjectSearchResult[];
+    const metadata = metadataData?.[0] as ProjectSearchResult | undefined;
     
     if (metadata) {
       // Check if metadata is already in results
-      const hasMetadata = results.some((r: any) => r.content_type === 'project_metadata');
+      const hasMetadata = results.some((r: ProjectSearchResult) => r.content_type === 'project_metadata');
       if (!hasMetadata) {
         // Add metadata at the beginning with a default similarity
         results.unshift({ ...metadata, similarity: 1.0 });
@@ -432,7 +448,7 @@ export async function searchCompanyProjects(
   query: string,
   threshold: number = 0.78,
   limit: number = 10
-): Promise<any[]> {
+): Promise<ProjectSearchResult[]> {
   try {
     const result = await generateEmbedding(query);
     if (result.error) {
@@ -449,7 +465,7 @@ export async function searchCompanyProjects(
       });
 
     if (error) throw error;
-    return data || [];
+    return (data || []) as ProjectSearchResult[];
   } catch (error) {
     console.error('Error searching company projects:', error);
     return [];
@@ -464,8 +480,8 @@ export async function searchCompanyProjects(
  */
 export async function generateProjectChatResponse(
   query: string,
-  context: any[]
-): Promise<{ answer: string; sources: any[]; error?: string }> {
+  context: ProjectSearchResult[]
+): Promise<{ answer: string; sources: ProjectSearchResult[]; error?: string }> {
   try {
     const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
     

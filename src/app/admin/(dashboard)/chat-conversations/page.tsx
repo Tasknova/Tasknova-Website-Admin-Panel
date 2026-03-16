@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useState } from 'react'
 import DataTable from '@/components/DataTable'
@@ -27,7 +27,7 @@ export default function ChatConversationsPage() {
       const res = await fetch('/api/admin/chat-conversations')
       const data = await res.json()
       setConversations(data)
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to fetch chat conversations')
     } finally {
       setLoading(false)
@@ -49,7 +49,7 @@ export default function ChatConversationsPage() {
       setDeleteModalOpen(false)
       setSelectedConvo(null)
       fetchConversations()
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to delete chat conversation')
     } finally {
       setDeleteLoading(false)
@@ -63,10 +63,10 @@ export default function ChatConversationsPage() {
     {
       key: 'messages',
       label: 'Messages',
-      render: (val: any) => {
+      render: (val: unknown) => {
         if (!val) return '0'
         try {
-          const messages = Array.isArray(val) ? val : JSON.parse(val)
+          const messages = Array.isArray(val) ? val : JSON.parse(val as string)
           return messages.length
         } catch {
           return '0'
@@ -87,7 +87,11 @@ export default function ChatConversationsPage() {
   // Calculate stats
   const totalMessages = conversations.reduce((sum, conv) => {
     try {
-      const messages = Array.isArray(conv.messages) ? conv.messages : JSON.parse(conv.messages || '[]')
+      const messages = Array.isArray(conv.messages)
+        ? conv.messages
+        : typeof conv.messages === 'string'
+          ? JSON.parse(conv.messages)
+          : []
       return sum + messages.length
     } catch {
       return sum
@@ -203,19 +207,21 @@ export default function ChatConversationsPage() {
                     try {
                       const messages = Array.isArray(selectedConvo.messages) 
                         ? selectedConvo.messages 
-                        : JSON.parse(selectedConvo.messages)
+                        : typeof selectedConvo.messages === 'string'
+                          ? JSON.parse(selectedConvo.messages)
+                          : []
                       
-                      return messages.map((msg: any, idx: number) => (
+                      return messages.map((msg: Record<string, unknown>, idx: number) => (
                         <div key={idx} className={`p-3 rounded ${
                           msg.role === 'user' ? 'bg-blue-50' : 'bg-gray-50'
                         }`}>
                           <p className="text-xs font-semibold text-gray-600 mb-1">
                             {msg.role === 'user' ? 'User' : 'Agent'}
                           </p>
-                          <p className="text-sm text-gray-800">{msg.content || msg.message}</p>
+                          <p className="text-sm text-gray-800">{String(msg.content ?? msg.message ?? '')}</p>
                         </div>
                       ))
-                    } catch (e) {
+                    } catch {
                       return <p className="text-sm text-gray-500">Unable to parse messages</p>
                     }
                   })()}
@@ -247,3 +253,5 @@ export default function ChatConversationsPage() {
     </div>
   )
 }
+
+

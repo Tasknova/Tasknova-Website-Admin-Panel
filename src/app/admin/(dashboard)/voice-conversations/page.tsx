@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useState } from 'react'
 import DataTable from '@/components/DataTable'
@@ -7,7 +7,7 @@ import DeleteConfirm from '@/components/DeleteConfirm'
 import { VoiceConversation } from '@/types'
 import { formatDateTime } from '@/lib/utils'
 import toast from 'react-hot-toast'
-import { ExternalLink, Play, Phone } from 'lucide-react'
+import { Phone, Share2, Download } from 'lucide-react'
 
 export default function VoiceConversationsPage() {
   const [conversations, setConversations] = useState<VoiceConversation[]>([])
@@ -26,7 +26,7 @@ export default function VoiceConversationsPage() {
       const res = await fetch('/api/admin/voice-conversations')
       const data = await res.json()
       setConversations(data)
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to fetch voice conversations')
     } finally {
       setLoading(false)
@@ -48,7 +48,7 @@ export default function VoiceConversationsPage() {
       setDeleteModalOpen(false)
       setSelectedConvo(null)
       fetchConversations()
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to delete voice conversation')
     } finally {
       setDeleteLoading(false)
@@ -247,7 +247,23 @@ export default function VoiceConversationsPage() {
                     rel="noopener noreferrer"
                     className="inline-flex items-center text-teal-700 hover:text-teal-900 font-medium text-sm transition-colors"
                   >
-                    <ExternalLink className="w-4 h-4 mr-2" /> Open in new tab
+                    <Download className="w-4 h-4 mr-2" /> Download Recording
+                  </a>
+                </div>
+              </div>
+            )}
+
+            {selectedConvo.web_call_url && (
+              <div className="bg-gradient-to-r from-blue-50 to-cyan-50 p-6 rounded-xl border border-blue-200">
+                <label className="text-sm font-semibold text-blue-900 mb-3 block">Web Call Link</label>
+                <div className="space-y-3">
+                  <a
+                    href={selectedConvo.web_call_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center text-blue-600 hover:text-blue-800 font-medium text-sm transition-colors"
+                  >
+                    <Share2 className="w-4 h-4 mr-2" /> Open Call Link
                   </a>
                 </div>
               </div>
@@ -300,3 +316,5 @@ export default function VoiceConversationsPage() {
     </div>
   )
 }
+
+

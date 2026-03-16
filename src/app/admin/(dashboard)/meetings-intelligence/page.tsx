@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -33,7 +33,7 @@ export default function MeetingsIntelligencePage() {
 
       const data = await res.json()
       setRows(data || [])
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to fetch meetings intelligence')
     } finally {
       setLoading(false)
@@ -121,3 +121,5 @@ export default function MeetingsIntelligencePage() {
     </div>
   )
 }
+
+

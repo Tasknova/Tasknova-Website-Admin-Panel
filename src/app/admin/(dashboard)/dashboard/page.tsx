@@ -1,8 +1,7 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useState } from 'react'
-import { createServerClient } from '@/lib/supabase'
-import { DashboardStats } from '@/types'
+import { DashboardStats, Admin, DemoRequest, VoiceConversation } from '@/types'
 import { 
   FileText, 
   Users, 
@@ -18,9 +17,9 @@ import Link from 'next/link'
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
-  const [recentDemos, setRecentDemos] = useState<any[]>([])
-  const [recentApplicants, setRecentApplicants] = useState<any[]>([])
-  const [recentVoiceCalls, setRecentVoiceCalls] = useState<any[]>([])
+  const [recentDemos, setRecentDemos] = useState<DemoRequest[]>([])
+  const [recentApplicants, setRecentApplicants] = useState<Admin[]>([])
+  const [recentVoiceCalls, setRecentVoiceCalls] = useState<VoiceConversation[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -66,7 +65,7 @@ export default function DashboardPage() {
     <div className="space-y-8 animate-fade-in">
       <div className="bg-gradient-to-r from-primary-600 to-purple-600 rounded-2xl p-8 text-white shadow-xl">
         <h1 className="text-4xl font-bold mb-2">Dashboard</h1>
-        <p className="text-primary-100 text-lg">Welcome back! Here's your platform overview</p>
+        <p className="text-primary-100 text-lg">Welcome back! Here&apos;s your platform overview</p>
       </div>
 
       {/* Stats Grid */}
@@ -105,7 +104,7 @@ export default function DashboardPage() {
             {recentDemos.length === 0 ? (
               <p className="text-sm text-gray-500 text-center py-8">No demo requests yet</p>
             ) : (
-              recentDemos.map((demo: any) => (
+              recentDemos.map((demo) => (
                 <div key={demo.id} className="flex justify-between items-start p-3 rounded-lg hover:bg-gray-50 transition-colors">
                   <div className="flex-1">
                     <p className="font-semibold text-sm text-gray-900">{demo.name}</p>
@@ -128,7 +127,7 @@ export default function DashboardPage() {
             {recentApplicants.length === 0 ? (
               <p className="text-sm text-gray-500 text-center py-8">No applicants yet</p>
             ) : (
-              recentApplicants.map((applicant: any) => (
+              recentApplicants.map((applicant) => (
                 <div key={applicant.id} className="flex justify-between items-start p-3 rounded-lg hover:bg-gray-50 transition-colors">
                   <div className="flex-1">
                     <p className="font-semibold text-sm text-gray-900">{applicant.full_name}</p>
@@ -166,7 +165,7 @@ export default function DashboardPage() {
                   </td>
                 </tr>
               ) : (
-                recentVoiceCalls.map((call: any) => (
+                recentVoiceCalls.map((call) => (
                   <tr key={call.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm font-medium text-gray-900">{call.customer_name || <span className="text-gray-400 italic">No customer data</span>}</div>
@@ -199,3 +198,4 @@ export default function DashboardPage() {
     </div>
   )
 }
+

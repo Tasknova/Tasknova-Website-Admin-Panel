@@ -123,7 +123,17 @@ export interface CompanyBrain {
   key_features?: string[];
   founder_info?: string;
   additional_context?: string;
-  [key: string]: any;
+}
+
+interface SearchResult {
+  content: string;
+  similarity: number;
+  [key: string]: string | number;
+}
+
+interface ChatContext {
+  content: string;
+  [key: string]: string;
 }
 
 /**
@@ -159,7 +169,7 @@ export interface CompanyBrainEmbedding {
   contentType: 'company_info' | 'document' | 'additional_context';
   contentId?: string;
   content: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, string | number | boolean>;
   embedding?: number[];
 }
 
@@ -274,7 +284,7 @@ export async function storeCompanyBrainWithEmbedding(
       embeddingStr: embeddingStr.substring(0, 100) + '...'
     });
 
-    const { data: insertData, error: insertError } = await supabase
+    const { error: insertError } = await supabase
       .from('company_brain_embeddings')
       .insert({
         user_id: userId,
@@ -381,7 +391,7 @@ export async function searchSimilarContent(
   query: string,
   threshold: number = 0.78,
   limit: number = 10
-): Promise<any[]> {
+): Promise<SearchResult[]> {
   try {
     // Generate query embedding
     const result = await generateEmbedding(query);
@@ -400,7 +410,7 @@ export async function searchSimilarContent(
       });
 
     if (error) throw error;
-    return data || [];
+    return (data || []) as SearchResult[];
   } catch (error) {
     console.error('Error searching content:', error);
     return [];
@@ -415,8 +425,8 @@ export async function searchSimilarContent(
  */
 export async function generateChatResponse(
   query: string,
-  context: any[]
-): Promise<{ answer: string; sources: any[]; error?: string }> {
+  context: ChatContext[]
+): Promise<{ answer: string; sources: ChatContext[]; error?: string }> {
   try {
     const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
     

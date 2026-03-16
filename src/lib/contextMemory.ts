@@ -7,7 +7,6 @@ import { SupabaseClient } from '@supabase/supabase-js'
 import {
   Insight,
   Classification,
-  ContextMemoryItem,
   EmbeddingResponse,
 } from '@/types'
 import { generateEmbedding } from './embeddings'
@@ -65,7 +64,7 @@ export async function classifyInsight(
     }
 
     // Compare with company brain metadata embeddings
-    const { data: companyMatches, error: companyError } = await supabase.rpc(
+    const { data: companyMatches } = await supabase.rpc(
       'match_company_brain_documents',
       {
         query_embedding: embedding.embedding,
@@ -75,7 +74,7 @@ export async function classifyInsight(
     )
 
     // Compare with project embeddings across all company projects
-    const { data: projectMatches, error: projectError } = await supabase.rpc(
+    const { data: projectMatches } = await supabase.rpc(
       'match_company_projects',
       {
         query_embedding: embedding.embedding,
@@ -126,8 +125,7 @@ export async function deduplicateInsight(
   type: 'company' | 'project',
   projectId: string | undefined,
   embedding: number[],
-  supabase: SupabaseClient,
-  userId: string
+  supabase: SupabaseClient
 ): Promise<boolean> {
   try {
     if (type === 'company') {

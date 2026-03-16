@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useState } from 'react'
 import { FileText, Mail, MailCheck, Building2, User, Clock, Globe, Calendar, MapPin } from 'lucide-react'
@@ -28,7 +28,7 @@ export default function DemoRequestsPage() {
       const res = await fetch('/api/admin/demo-requests')
       const data = await res.json()
       setDemoRequests(data)
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to fetch demo requests')
     } finally {
       setLoading(false)
@@ -50,7 +50,7 @@ export default function DemoRequestsPage() {
       setDeleteModalOpen(false)
       setSelectedDemo(null)
       fetchDemoRequests()
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to delete demo request')
     } finally {
       setDeleteLoading(false)
@@ -335,3 +335,5 @@ export default function DemoRequestsPage() {
     </div>
   )
 }
+
+

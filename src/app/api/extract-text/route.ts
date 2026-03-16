@@ -28,14 +28,18 @@ export async function POST(request: Request) {
     if (mimeType === 'application/pdf' || fileName.endsWith('.pdf')) {
       // PDF extraction using pdf-parse
       try {
-        // Use require to avoid ESM issues with pdf-parse
-        const pdfParse = require('pdf-parse');
+        // Use dynamic import to load pdf-parse
+        const pdfParseModule = await import('pdf-parse');
+        const pdfParse = pdfParseModule.default;
         const arrayBuffer = await file.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
         console.log(`[extract-text] PDF buffer size: ${buffer.length} bytes`);
         
-        const data = await pdfParse(buffer);
-        extractedText = data.text.trim();
+        interface PdfParseResult {
+          text: string;
+        }
+        const pdfData = (await pdfParse(buffer)) as PdfParseResult;
+        extractedText = pdfData.text.trim();
         
         console.log(`[extract-text] Extracted ${extractedText.length} characters from PDF`);
         
@@ -46,12 +50,13 @@ export async function POST(request: Request) {
             message: 'PDF appears to be image-based (scanned). No text layer found.'
           });
         }
-      } catch (pdfError: any) {
+      } catch (pdfError: unknown) {
+        const errorMessage = pdfError instanceof Error ? pdfError.message : 'Unknown error';
         console.error('[extract-text] PDF parsing error:', pdfError);
         return NextResponse.json({ 
           success: true, 
           text: null,
-          message: `PDF extraction failed: ${pdfError?.message || 'Unknown error'}`
+          message: `PDF extraction failed: ${errorMessage}`
         });
       }
       
@@ -61,20 +66,25 @@ export async function POST(request: Request) {
     ) {
       // Word document extraction
       try {
-        const mammoth = require('mammoth');
+        const mammothModule = await import('mammoth');
+        const mammoth = mammothModule.default;
         const arrayBuffer = await file.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
         console.log(`[extract-text] Word buffer size: ${buffer.length} bytes`);
         
-        const result = await mammoth.extractRawText({ buffer });
+        interface ExtractRawTextResult {
+          value: string;
+        }
+        const result = (await mammoth.extractRawText({ buffer })) as ExtractRawTextResult;
         extractedText = result.value.trim();
         console.log(`[extract-text] Extracted ${extractedText.length} characters from Word document`);
-      } catch (docError: any) {
+      } catch (docError: unknown) {
+        const errorMessage = docError instanceof Error ? docError.message : 'Unknown error';
         console.error('[extract-text] Word parsing error:', docError);
         return NextResponse.json({ 
           success: true, 
           text: null,
-          message: `Word extraction failed: ${docError?.message || 'Unknown error'}`
+          message: `Word extraction failed: ${errorMessage}`
         });
       }
       

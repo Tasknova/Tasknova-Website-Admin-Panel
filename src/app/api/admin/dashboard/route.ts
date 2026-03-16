@@ -16,8 +16,8 @@ export async function GET() {
     const [
       { count: demoCount },
       { count: applicantCount },
-      { count: jobCount, data: jobs },
-      { count: blogCount, data: blogs },
+      { data: jobs },
+      { data: blogs },
       { count: playbookCount },
       { count: reportCount },
       { count: voiceCount },
@@ -52,8 +52,14 @@ export async function GET() {
       .order('created_at', { ascending: false })
       .limit(5)
 
-    const activeJobs = jobs?.filter((job: any) => job.is_active).length || 0
-    const publishedBlogs = blogs?.filter((blog: any) => blog.is_published).length || 0
+    interface JobRecord {
+      is_active: boolean;
+    }
+    interface BlogRecord {
+      is_published: boolean;
+    }
+    const activeJobs = jobs?.filter((job: JobRecord) => job.is_active).length || 0
+    const publishedBlogs = blogs?.filter((blog: BlogRecord) => blog.is_published).length || 0
 
     return NextResponse.json({
       stats: {

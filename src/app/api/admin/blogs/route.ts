@@ -53,11 +53,12 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json(data[0])
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error)
     console.error('Create error:', error)
     return NextResponse.json({ 
       error: 'Failed to create blog',
-      details: error.message || error.toString()
+      details: errorMessage
     }, { status: 500 })
   }
 }

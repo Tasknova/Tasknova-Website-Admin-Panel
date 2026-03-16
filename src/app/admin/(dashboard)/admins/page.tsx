@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useState } from 'react'
 import { Plus, Shield } from 'lucide-react'
@@ -13,7 +13,7 @@ export default function AdminsPage() {
   const [admins, setAdmins] = useState<Admin[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedAdmin, setSelectedAdmin] = useState<Admin | null>(null)
-  const [currentAdmin, setCurrentAdmin] = useState<any>(null)
+  const [currentAdmin, setCurrentAdmin] = useState<Admin | null>(null)
   const [createModalOpen, setCreateModalOpen] = useState(false)
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(false)
@@ -40,7 +40,7 @@ export default function AdminsPage() {
       if (data.authenticated) {
         setCurrentAdmin(data.admin)
       }
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       console.error('Failed to fetch current admin')
     }
   }
@@ -50,7 +50,7 @@ export default function AdminsPage() {
       const res = await fetch('/api/admin/admins')
       const data = await res.json()
       setAdmins(data)
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to fetch admins')
     } finally {
       setLoading(false)
@@ -81,8 +81,9 @@ export default function AdminsPage() {
       setCreateModalOpen(false)
       setFormData({ full_name: '', email: '', password: '', role: 'admin' })
       fetchAdmins()
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to create admin')
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to create admin'
+      toast.error(errorMessage)
     }
   }
 
@@ -108,7 +109,7 @@ export default function AdminsPage() {
 
       toast.success(`Admin ${!admin.is_active ? 'activated' : 'deactivated'}`)
       fetchAdmins()
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to update admin status')
     }
   }
@@ -138,7 +139,7 @@ export default function AdminsPage() {
       setDeleteModalOpen(false)
       setSelectedAdmin(null)
       fetchAdmins()
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to delete admin')
     } finally {
       setDeleteLoading(false)
@@ -361,7 +362,7 @@ export default function AdminsPage() {
             <label className="block text-sm font-medium mb-2">Role</label>
             <select
               value={formData.role}
-              onChange={(e) => setFormData({ ...formData, role: e.target.value as any })}
+              onChange={(e) => setFormData({ ...formData, role: e.target.value as Admin['role'] })}
               className="input-field"
             >
               <option value="admin">Admin</option>
@@ -396,3 +397,5 @@ export default function AdminsPage() {
     </div>
   )
 }
+
+

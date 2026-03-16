@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -33,7 +33,7 @@ export default function LoginPage() {
       toast.success('Login successful!')
       router.push('/admin/dashboard')
       router.refresh()
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('An error occurred')
     } finally {
       setLoading(false)
@@ -85,7 +85,7 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all"
-              placeholder="••••••••"
+              placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
               required
             />
           </div>
@@ -111,10 +111,12 @@ export default function LoginPage() {
 
         <div className="mt-6 pt-6 border-t border-gray-200">
           <p className="text-xs text-gray-500 text-center">
-            Tasknova © {new Date().getFullYear()} • All rights reserved
+            Tasknova Â© {new Date().getFullYear()} â€¢ All rights reserved
           </p>
         </div>
       </div>
     </div>
   )
 }
+
+

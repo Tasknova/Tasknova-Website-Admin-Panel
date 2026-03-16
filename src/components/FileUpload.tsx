@@ -57,7 +57,7 @@ export default function FileUpload({
       const filePath = fileName
 
       // Upload to Supabase Storage
-      const { data, error } = await supabase.storage
+      const { error } = await supabase.storage
         .from(bucket)
         .upload(filePath, file, {
           cacheControl: '3600',
@@ -77,9 +77,10 @@ export default function FileUpload({
       setFileName(file.name)
       onChange(publicUrl)
       toast.success('File uploaded successfully')
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error uploading file:', error)
-      toast.error(error.message || 'Failed to upload file')
+      const message = error instanceof Error ? error.message : 'Failed to upload file'
+      toast.error(message)
     } finally {
       setUploading(false)
       if (fileInputRef.current) {

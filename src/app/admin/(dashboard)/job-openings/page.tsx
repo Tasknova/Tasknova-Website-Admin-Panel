@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useState } from 'react'
 import { Plus, Briefcase } from 'lucide-react'
@@ -45,7 +45,7 @@ export default function JobOpeningsPage() {
       const res = await fetch('/api/admin/job-openings')
       const data = await res.json()
       setJobs(data)
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to fetch job openings')
     } finally {
       setLoading(false)
@@ -67,7 +67,7 @@ export default function JobOpeningsPage() {
       setDeleteModalOpen(false)
       setSelectedJob(null)
       fetchJobs()
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to delete job opening')
     } finally {
       setDeleteLoading(false)
@@ -86,7 +86,7 @@ export default function JobOpeningsPage() {
 
       toast.success(`Job ${!job.is_active ? 'activated' : 'deactivated'}`)
       fetchJobs()
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to update job status')
     }
   }
@@ -107,7 +107,7 @@ export default function JobOpeningsPage() {
       setCreateModalOpen(false)
       setFormData({ title: '', department: '', location: '', type: 'Full-time', description: '', about: '', responsibilities: [], skills: [], is_active: true })
       fetchJobs()
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to create job opening')
     } finally {
       setSaveLoading(false)
@@ -132,7 +132,7 @@ export default function JobOpeningsPage() {
       setEditModalOpen(false)
       setSelectedJob(null)
       fetchJobs()
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to update job opening')
     } finally {
       setSaveLoading(false)
@@ -541,7 +541,7 @@ export default function JobOpeningsPage() {
                 <div key={idx} className="flex items-center gap-2 px-3 py-1 bg-primary-100 text-primary-800 rounded-full">
                   <span className="text-sm">{skill}</span>
                   <button type="button" onClick={() => removeSkill(idx)} className="text-primary-600 hover:text-primary-800 font-bold">
-                    ×
+                    Ã—
                   </button>
                 </div>
               ))}
@@ -596,3 +596,5 @@ export default function JobOpeningsPage() {
     </div>
   )
 }
+
+

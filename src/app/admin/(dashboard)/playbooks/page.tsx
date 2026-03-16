@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useState } from 'react'
 import DataTable from '@/components/DataTable'
@@ -8,7 +8,7 @@ import FileUpload from '@/components/FileUpload'
 import { Playbook } from '@/types'
 import { formatDate } from '@/lib/utils'
 import toast from 'react-hot-toast'
-import { Download, ExternalLink, Book, Plus } from 'lucide-react'
+import { Download, Book, Plus } from 'lucide-react'
 
 export default function PlaybooksPage() {
   const [playbooks, setPlaybooks] = useState<Playbook[]>([])
@@ -31,7 +31,7 @@ export default function PlaybooksPage() {
       const res = await fetch('/api/admin/playbooks')
       const data = await res.json()
       setPlaybooks(data)
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to fetch playbooks')
     } finally {
       setLoading(false)
@@ -63,9 +63,10 @@ export default function PlaybooksPage() {
       setCreateModalOpen(false)
       setFormData({})
       fetchPlaybooks()
-    } catch (error: any) {
+    } catch (error) {
       console.error('Create error:', error)
-      toast.error(error.message || 'Failed to create playbook')
+      const message = error instanceof Error ? error.message : 'Failed to create playbook'
+      toast.error(message)
     }
   }
 
@@ -92,7 +93,7 @@ export default function PlaybooksPage() {
       setSelectedPlaybook(null)
       setFormData({})
       fetchPlaybooks()
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to update playbook')
     }
   }
@@ -112,7 +113,7 @@ export default function PlaybooksPage() {
       setDeleteModalOpen(false)
       setSelectedPlaybook(null)
       fetchPlaybooks()
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to delete playbook')
     } finally {
       setDeleteLoading(false)
@@ -383,7 +384,10 @@ export default function PlaybooksPage() {
             <input
               type="text"
               value={formData.topics ? (Array.isArray(formData.topics) ? formData.topics.join(', ') : formData.topics) : ''}
-              onChange={(e) => setFormData({ ...formData, topics: e.target.value as any })}
+              onChange={(e) => setFormData({
+                ...formData,
+                topics: e.target.value.split(',').map((item) => item.trim()).filter(Boolean)
+              })}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
               placeholder="Sales, Marketing, Strategy"
             />
@@ -432,3 +436,5 @@ export default function PlaybooksPage() {
     </div>
   )
 }
+
+

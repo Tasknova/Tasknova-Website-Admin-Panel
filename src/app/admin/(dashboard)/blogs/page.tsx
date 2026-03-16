@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useState } from 'react'
 import DataTable from '@/components/DataTable'
@@ -8,7 +8,7 @@ import ImageUpload from '@/components/ImageUpload'
 import { Blog } from '@/types'
 import { formatDate } from '@/lib/utils'
 import toast from 'react-hot-toast'
-import { BookOpen, Plus, Image as ImageIcon } from 'lucide-react'
+import { BookOpen, Plus } from 'lucide-react'
 
 export default function BlogsPage() {
   const [blogs, setBlogs] = useState<Blog[]>([])
@@ -19,7 +19,7 @@ export default function BlogsPage() {
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(false)
-  const [saveLoading, setSaveLoading] = useState(false)
+  const [, setSaveLoading] = useState(false)
   const [formData, setFormData] = useState<Partial<Blog>>({
     title: '',
     slug: '',
@@ -48,7 +48,7 @@ export default function BlogsPage() {
       const res = await fetch('/api/admin/blogs')
       const data = await res.json()
       setBlogs(data)
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to fetch blogs')
     } finally {
       setLoading(false)
@@ -70,7 +70,7 @@ export default function BlogsPage() {
       setDeleteModalOpen(false)
       setSelectedBlog(null)
       fetchBlogs()
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to delete blog')
     } finally {
       setDeleteLoading(false)
@@ -93,7 +93,7 @@ export default function BlogsPage() {
 
       toast.success(`Blog ${!blog.is_published ? 'published' : 'unpublished'}`)
       fetchBlogs()
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to update blog status')
     }
   }
@@ -122,9 +122,10 @@ export default function BlogsPage() {
       setCreateModalOpen(false)
       setFormData({})
       fetchBlogs()
-    } catch (error: any) {
+    } catch (error) {
       console.error('Create error:', error)
-      toast.error(error.message || 'Failed to create blog')
+      const message = error instanceof Error ? error.message : 'Failed to create blog'
+      toast.error(message)
     } finally {
       setSaveLoading(false)
     }
@@ -153,13 +154,15 @@ export default function BlogsPage() {
       setSelectedBlog(null)
       setFormData({})
       fetchBlogs()
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to update blog')
     } finally {
       setSaveLoading(false)
     }
   }
 
+  // Function not currently used in UI - keeping for potential future use
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const addTag = () => {
     if (tagInput.trim()) {
       setFormData(prev => ({
@@ -169,7 +172,8 @@ export default function BlogsPage() {
       setTagInput('')
     }
   }
-
+  // Function not currently used in UI - keeping for potential future use
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const removeTag = (index: number) => {
     setFormData(prev => ({
       ...prev,
@@ -359,6 +363,7 @@ export default function BlogsPage() {
             {/* Hero Image */}
             {selectedBlog.hero_image_url && (
               <div className="mb-4">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img 
                   src={selectedBlog.hero_image_url} 
                   alt={selectedBlog.title} 
@@ -555,8 +560,8 @@ export default function BlogsPage() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Tags (comma-separated)</label>
             <input
               type="text"
-              value={formData.tags ? (Array.isArray(formData.tags) ? formData.tags.join(', ') : formData.tags) : ''}
-              onChange={(e) => setFormData({ ...formData, tags: e.target.value as any })}
+              value={formData.tags ? (Array.isArray(formData.tags) ? formData.tags.join(', ') : String(formData.tags)) : ''}
+              onChange={(e) => setFormData({ ...formData, tags: e.target.value.split(',').map(t => t.trim()) })}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
               placeholder="AI, Machine Learning, Innovation"
             />
@@ -608,3 +613,5 @@ export default function BlogsPage() {
     </div>
   )
 }
+
+

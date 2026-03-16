@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useState } from 'react'
 import DataTable from '@/components/DataTable'
@@ -32,7 +32,7 @@ export default function IndustryReportsPage() {
       const res = await fetch('/api/admin/industry-reports')
       const data = await res.json()
       setReports(data)
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to fetch industry reports')
     } finally {
       setLoading(false)
@@ -66,9 +66,10 @@ export default function IndustryReportsPage() {
       setCreateModalOpen(false)
       setFormData({})
       fetchReports()
-    } catch (error: any) {
+    } catch (error) {
       console.error('Create error:', error)
-      toast.error(error.message || 'Failed to create report')
+      const message = error instanceof Error ? error.message : 'Failed to create report'
+      toast.error(message)
     }
   }
 
@@ -96,7 +97,7 @@ export default function IndustryReportsPage() {
       setSelectedReport(null)
       setFormData({})
       fetchReports()
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to update report')
     }
   }
@@ -116,7 +117,7 @@ export default function IndustryReportsPage() {
       setDeleteModalOpen(false)
       setSelectedReport(null)
       fetchReports()
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to delete industry report')
     } finally {
       setDeleteLoading(false)
@@ -135,7 +136,7 @@ export default function IndustryReportsPage() {
 
       toast.success(`Report ${!report.is_published ? 'published' : 'unpublished'}`)
       fetchReports()
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Failed to update report status')
     }
   }
@@ -466,7 +467,10 @@ export default function IndustryReportsPage() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Key Findings (comma-separated)</label>
             <textarea
               value={formData.key_findings ? (Array.isArray(formData.key_findings) ? formData.key_findings.join(', ') : formData.key_findings) : ''}
-              onChange={(e) => setFormData({ ...formData, key_findings: e.target.value as any })}
+              onChange={(e) => setFormData({
+                ...formData,
+                key_findings: e.target.value.split(',').map((item) => item.trim()).filter(Boolean)
+              })}
               rows={3}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
               placeholder="Finding 1, Finding 2, Finding 3"
@@ -529,3 +533,5 @@ export default function IndustryReportsPage() {
     </div>
   )
 }
+
+

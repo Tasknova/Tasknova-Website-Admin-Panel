@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
@@ -56,7 +56,7 @@ export default function AdminLayout({
       toast.success('Logged out successfully')
       router.push('/admin/login')
       router.refresh()
-    } catch (error) {
+    } catch { // eslint-disable-next-line @typescript-eslint/no-unused-vars
       toast.error('Logout failed')
     }
   }
@@ -182,4 +182,6 @@ export default function AdminLayout({
     </div>
   )
 }
+
+
 
