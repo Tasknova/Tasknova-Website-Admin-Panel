@@ -207,6 +207,7 @@ export async function storeContextMemory(
         .from('company_context_memory')
         .insert({
           user_id: userId,
+          approval_status: 'pending',
           insight_text: insight.text,
           confidence_score: insight.confidence,
           relevance_score: insight.confidence,
@@ -226,17 +227,8 @@ export async function storeContextMemory(
         return null
       }
 
-      // Store embedding
-      if (data?.id) {
-        await storeEmbedding(
-          data.id,
-          embedding,
-          'company',
-          supabase,
-          userId
-        )
-        return data.id
-      }
+      // Embedding is stored only after explicit approval.
+      if (data?.id) return data.id
     } else if (classification.type === 'project' && classification.project_id) {
       // Store in project context memory
       const { data, error } = await supabase
@@ -244,6 +236,7 @@ export async function storeContextMemory(
         .insert({
           user_id: userId,
           project_id: classification.project_id,
+          approval_status: 'pending',
           insight_text: insight.text,
           confidence_score: insight.confidence,
           relevance_score: insight.confidence,
@@ -263,53 +256,14 @@ export async function storeContextMemory(
         return null
       }
 
-      // Store embedding
-      if (data?.id) {
-        await storeEmbedding(
-          data.id,
-          embedding,
-          'project',
-          supabase,
-          userId
-        )
-        return data.id
-      }
+      // Embedding is stored only after explicit approval.
+      if (data?.id) return data.id
     }
 
     return null
   } catch (error) {
     console.error('Error storing context memory:', error)
     return null
-  }
-}
-
-/**
- * Store embedding vector in embeddings table
- */
-async function storeEmbedding(
-  contextMemoryId: string,
-  embedding: number[],
-  type: 'company' | 'project',
-  supabase: SupabaseClient,
-  userId: string
-): Promise<void> {
-  try {
-    const table =
-      type === 'company'
-        ? 'company_context_embeddings'
-        : 'project_context_embeddings'
-
-    const { error } = await supabase.from(table).insert({
-      user_id: userId,
-      context_memory_id: contextMemoryId,
-      embedding,
-    })
-
-    if (error) {
-      console.error(`Error storing ${type} embedding:`, error)
-    }
-  } catch (error) {
-    console.error(`Error storing ${type} embedding:`, error)
   }
 }
 
@@ -374,6 +328,7 @@ export async function manageLRUCleanup(
       .from(table)
       .select('*', { count: 'exact', head: true })
       .eq('user_id', userId)
+      .eq('approval_status', 'approved')
 
     if (type === 'project' && projectId) {
       countQuery = countQuery.eq('project_id', projectId)
@@ -391,6 +346,7 @@ export async function manageLRUCleanup(
       .from(table)
       .select('id')
       .eq('user_id', userId)
+      .eq('approval_status', 'approved')
       .eq('is_pinned', false)
       .order('last_accessed_at', { ascending: true })
       .limit(itemsToRemove)
@@ -468,16 +424,19 @@ export async function getContextMemoryStats(
       .from('company_context_memory')
       .select('*', { count: 'exact', head: true })
       .eq('user_id', userId)
+      .eq('approval_status', 'approved')
 
     const { count: projectCount } = await supabase
       .from('project_context_memory')
       .select('*', { count: 'exact', head: true })
       .eq('user_id', userId)
+      .eq('approval_status', 'approved')
 
     const { count: pinnedCount } = await supabase
       .from('company_context_memory')
       .select('*', { count: 'exact', head: true })
       .eq('user_id', userId)
+      .eq('approval_status', 'approved')
       .eq('is_pinned', true)
 
     const { data: latestMeeting } = await supabase

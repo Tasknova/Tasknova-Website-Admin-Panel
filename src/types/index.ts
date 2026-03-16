@@ -427,6 +427,11 @@ export interface ContextMemoryItem {
   id: string
   user_id: string
   project_id?: string
+  approval_status: 'pending' | 'approved' | 'disapproved'
+  approved_at?: string
+  approved_by?: string
+  approved_disapproved_at?: string
+  approved_disapproved_by?: string
   insight_text: string
   confidence_score: number
   relevance_score: number

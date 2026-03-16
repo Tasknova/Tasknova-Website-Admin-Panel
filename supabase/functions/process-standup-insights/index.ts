@@ -150,7 +150,7 @@ function validateInsight(insight: Insight): boolean {
 async function storeInsight(
   insight: Insight,
   classification: { type: "company" | "project"; projectId?: string; confidence: number },
-  embedding: number[],
+  _embedding: number[],
   supabase: ReturnType<typeof createClient>,
   userId: string,
   meetingRowId: string,
@@ -162,6 +162,7 @@ async function storeInsight(
         .from("company_context_memory")
         .insert({
           user_id: userId,
+          approval_status: "pending",
           insight_text: insight.text,
           confidence_score: insight.confidence,
           relevance_score: insight.confidence,
@@ -181,17 +182,6 @@ async function storeInsight(
         return false
       }
 
-      const { error: embError } = await supabase.from("company_context_embeddings").insert({
-        user_id: userId,
-        context_memory_id: inserted.id,
-        embedding,
-      })
-
-      if (embError) {
-        console.error("Error storing company context embedding:", embError)
-        return false
-      }
-
       return true
     }
 
@@ -201,6 +191,7 @@ async function storeInsight(
         .insert({
           user_id: userId,
           project_id: classification.projectId,
+          approval_status: "pending",
           insight_text: insight.text,
           confidence_score: insight.confidence,
           relevance_score: insight.confidence,
@@ -217,17 +208,6 @@ async function storeInsight(
 
       if (error || !inserted?.id) {
         console.error("Error storing project context memory:", error)
-        return false
-      }
-
-      const { error: embError } = await supabase.from("project_context_embeddings").insert({
-        user_id: userId,
-        context_memory_id: inserted.id,
-        embedding,
-      })
-
-      if (embError) {
-        console.error("Error storing project context embedding:", embError)
         return false
       }
 

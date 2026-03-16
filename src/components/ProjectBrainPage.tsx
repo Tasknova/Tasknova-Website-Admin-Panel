@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Trash2, Pin, PinOff } from 'lucide-react';
+import { Trash2, Pin, PinOff, Check, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import {
   storeProjectMetadataWithEmbedding,
@@ -114,6 +114,7 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
   const [contextMemories, setContextMemories] = useState<ProjectContextMemory[]>([]);
   const [contextLoading, setContextLoading] = useState(false);
   const [contextFilter, setContextFilter] = useState<'all' | 'pinned'>('all');
+  const [contextApprovalFilter, setContextApprovalFilter] = useState<'all' | 'approved' | 'pending' | 'disapproved'>('all');
   const [contextSortBy, setContextSortBy] = useState<'recent' | 'accessed' | 'confidence'>('recent');
   const [, setSelectedContext] = useState<ProjectContextMemory | null>(null);
   
@@ -142,7 +143,7 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
     if (activeTab === 'context-memory' && userId) {
       loadContextMemories();
     }
-  }, [activeTab, contextFilter, contextSortBy, userId]);
+  }, [activeTab, contextFilter, contextApprovalFilter, contextSortBy, userId]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -216,7 +217,9 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
       const params = new URLSearchParams({
         projectId,
         filter: contextFilter,
+        approvalStatus: contextApprovalFilter,
         sort: contextSortBy,
+        includePending: 'true',
       });
       const res = await fetch(`/api/admin/project-context-memory?${params.toString()}`);
       if (!res.ok) throw new Error('Failed to fetch project context memory');
@@ -254,6 +257,34 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
       setSelectedContext(null);
     } catch (error) {
       console.error('Error deleting context:', error);
+    }
+  }
+
+  async function approveContext(id: string) {
+    try {
+      const res = await fetch('/api/admin/project-context-memory', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, projectId, action: 'approve' }),
+      });
+      if (!res.ok) throw new Error('Failed to approve project context memory');
+      await loadContextMemories();
+    } catch (error) {
+      console.error('Error approving context:', error);
+    }
+  }
+
+  async function disapproveContext(id: string) {
+    try {
+      const res = await fetch('/api/admin/project-context-memory', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, projectId, action: 'disapprove' }),
+      });
+      if (!res.ok) throw new Error('Failed to disapprove project context memory');
+      await loadContextMemories();
+    } catch (error) {
+      console.error('Error disapproving context:', error);
     }
   }
 
@@ -1340,6 +1371,19 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
                     </select>
                   </div>
                   <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Approval:</label>
+                    <select
+                      value={contextApprovalFilter}
+                      onChange={(e) => setContextApprovalFilter(e.target.value as 'all' | 'approved' | 'pending' | 'disapproved')}
+                      className="px-3 py-2 border border-gray-300 rounded-md"
+                    >
+                      <option value="all">All Statuses</option>
+                      <option value="approved">Approved</option>
+                      <option value="pending">Pending</option>
+                      <option value="disapproved">Rejected</option>
+                    </select>
+                  </div>
+                  <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Sort by:</label>
                     <select
                       value={contextSortBy}
@@ -1377,6 +1421,21 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
                                 <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded font-medium">
                                   {(memory.confidence_score * 100).toFixed(0)}% confidence
                                 </span>
+                                {memory.approval_status === 'approved' && (
+                                  <span className="px-2 py-1 bg-emerald-100 text-emerald-700 text-xs rounded font-medium">
+                                    Approved
+                                  </span>
+                                )}
+                                {memory.approval_status === 'pending' && (
+                                  <span className="px-2 py-1 bg-yellow-100 text-yellow-700 text-xs rounded font-medium">
+                                    Pending Approval
+                                  </span>
+                                )}
+                                {memory.approval_status === 'disapproved' && (
+                                  <span className="px-2 py-1 bg-rose-100 text-rose-700 text-xs rounded font-medium">
+                                    Rejected
+                                  </span>
+                                )}
                                 <span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded font-medium">
                                   {memory.access_count} accessed
                                 </span>
@@ -1394,13 +1453,32 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
                             )}
                           </div>
                           <div className="flex gap-2 ml-4">
-                            <button
-                              onClick={() => togglePinContext(memory.id, memory.is_pinned)}
-                              className="p-2 text-gray-400 hover:text-yellow-500 transition-colors"
-                              title={memory.is_pinned ? 'Unpin' : 'Pin'}
-                            >
-                              {memory.is_pinned ? <PinOff className="w-5 h-5" /> : <Pin className="w-5 h-5" />}
-                            </button>
+                            {memory.approval_status === 'pending' ? (
+                              <>
+                                <button
+                                  onClick={() => approveContext(memory.id)}
+                                  className="p-2 text-gray-400 hover:text-emerald-600 transition-colors"
+                                  title="Approve"
+                                >
+                                  <Check className="w-5 h-5" />
+                                </button>
+                                <button
+                                  onClick={() => disapproveContext(memory.id)}
+                                  className="p-2 text-gray-400 hover:text-red-500 transition-colors"
+                                  title="Disapprove"
+                                >
+                                  <X className="w-5 h-5" />
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                onClick={() => togglePinContext(memory.id, memory.is_pinned)}
+                                className="p-2 text-gray-400 hover:text-yellow-500 transition-colors"
+                                title={memory.is_pinned ? 'Unpin' : 'Pin'}
+                              >
+                                {memory.is_pinned ? <PinOff className="w-5 h-5" /> : <Pin className="w-5 h-5" />}
+                              </button>
+                            )}
                             <button
                               onClick={() => deleteContext(memory.id)}
                               className="p-2 text-gray-400 hover:text-red-500 transition-colors"
