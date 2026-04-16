@@ -2,15 +2,44 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@/lib/supabase'
 import { getSession } from '@/lib/auth'
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const session = await getSession()
   if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   const supabase = createServerClient()
+  const { searchParams } = new URL(request.url)
+  const id = searchParams.get('id')
 
   try {
+    if (id) {
+      const { data: applicant, error: applicantError } = await supabase
+        .from('job_applicants')
+        .select('*')
+        .eq('id', id)
+        .single()
+
+      if (applicantError) throw applicantError
+
+      let jobOpening = null
+
+      if (applicant?.job_id) {
+        const { data: jobData } = await supabase
+          .from('job_openings')
+          .select('*')
+          .eq('id', applicant.job_id)
+          .single()
+
+        jobOpening = jobData || null
+      }
+
+      return NextResponse.json({
+        ...applicant,
+        job_opening: jobOpening,
+      })
+    }
+
     const { data, error } = await supabase
       .from('job_applicants')
       .select('*')

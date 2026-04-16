@@ -54,8 +54,14 @@ export interface JobApplicant {
   linkedin_url: string
   linkedin_scraped_data: Record<string, unknown>
   portfolio_scraped_data: Record<string, unknown>
-  ai_score: number
+  ai_score: number | null
   ai_score_reasoning: string
+  analysis_status: 'not_started' | 'processing' | 'completed' | 'failed'
+  analysis_data: Record<string, unknown> | null
+  analyzed_at: string | null
+  analysis_error: string | null
+  resume_extracted_text: string | null
+  job_opening?: JobOpening | null
   answers: Record<string, unknown>
   created_at: string
 }
