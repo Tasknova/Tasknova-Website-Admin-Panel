@@ -1,19 +1,19 @@
 ﻿'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import DataTable from '@/components/DataTable'
-import Modal from '@/components/Modal'
 import DeleteConfirm from '@/components/DeleteConfirm'
 import { VoiceConversation } from '@/types'
 import { formatDateTime } from '@/lib/utils'
 import toast from 'react-hot-toast'
-import { Phone, Share2, Download } from 'lucide-react'
+import { Phone } from 'lucide-react'
 
 export default function VoiceConversationsPage() {
+  const router = useRouter()
   const [conversations, setConversations] = useState<VoiceConversation[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedConvo, setSelectedConvo] = useState<VoiceConversation | null>(null)
-  const [viewModalOpen, setViewModalOpen] = useState(false)
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(false)
 
@@ -152,8 +152,7 @@ export default function VoiceConversationsPage() {
         data={conversations}
         columns={columns}
         onView={(row) => {
-          setSelectedConvo(row)
-          setViewModalOpen(true)
+          router.push(`/admin/voice-conversations/${row.id}`)
         }}
         onDelete={(row) => {
           setSelectedConvo(row)
@@ -161,148 +160,6 @@ export default function VoiceConversationsPage() {
         }}
         searchKeys={['customer_name', 'customer_email', 'customer_phone']}
       />
-
-      {/* View Modal */}
-      {selectedConvo && (
-        <Modal
-          isOpen={viewModalOpen}
-          onClose={() => setViewModalOpen(false)}
-          title="Voice Conversation Details"
-          size="xl"
-        >
-          <div className="space-y-6">
-            {/* Customer Info Section */}
-            {(!selectedConvo.customer_name && !selectedConvo.customer_email && !selectedConvo.customer_phone) && (
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
-                <div className="flex-shrink-0 w-5 h-5 rounded-full bg-amber-500 flex items-center justify-center text-white text-xs font-bold">!</div>
-                <div>
-                  <p className="text-sm font-semibold text-amber-900">No Customer Information Available</p>
-                  <p className="text-xs text-amber-700 mt-1">This conversation does not have associated customer details.</p>
-                </div>
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-6">
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Customer Name</label>
-                <p className="text-base font-medium text-gray-900">
-                  {selectedConvo.customer_name || <span className="text-gray-400 italic">Not provided</span>}
-                </p>
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Email</label>
-                <p className="text-base text-gray-900">
-                  {selectedConvo.customer_email || <span className="text-gray-400 italic">Not provided</span>}
-                </p>
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Phone</label>
-                <p className="text-base text-gray-900">
-                  {selectedConvo.customer_phone || <span className="text-gray-400 italic">Not provided</span>}
-                </p>
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</label>
-                <p className="mt-1">
-                  <span className={`badge ${
-                    selectedConvo.status === 'ended' ? 'badge-success' : 
-                    selectedConvo.status === 'queued' ? 'badge-warning' :
-                    selectedConvo.status === 'in_progress' ? 'badge-info' : 
-                    selectedConvo.status === 'failed' ? 'badge-danger' :
-                    'badge-warning'
-                  }`}>
-                    {selectedConvo.status === 'ended' ? 'Ended' : 
-                     selectedConvo.status === 'queued' ? 'Queued' :
-                     selectedConvo.status === 'in_progress' ? 'In Progress' :
-                     selectedConvo.status === 'failed' ? 'Failed' :
-                     selectedConvo.status || 'Unknown'}
-                  </span>
-                </p>
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Duration</label>
-                <p className="text-base font-medium text-gray-900">
-                  {selectedConvo.duration_seconds 
-                    ? `${Math.floor(selectedConvo.duration_seconds / 60)}m ${selectedConvo.duration_seconds % 60}s`
-                    : '-'}
-                </p>
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Cost</label>
-                <p className="text-base font-semibold text-green-600">{selectedConvo.cost ? `$${selectedConvo.cost.toFixed(2)}` : '-'}</p>
-              </div>
-            </div>
-
-            {selectedConvo.recording_url && (
-              <div className="bg-gradient-to-r from-teal-50 to-cyan-50 p-6 rounded-xl border border-teal-200">
-                <label className="text-sm font-semibold text-teal-900 mb-3 block">Recording</label>
-                <div className="space-y-3">
-                  <audio controls className="w-full">
-                    <source src={selectedConvo.recording_url} />
-                    Your browser does not support the audio element.
-                  </audio>
-                  <a
-                    href={selectedConvo.recording_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center text-teal-700 hover:text-teal-900 font-medium text-sm transition-colors"
-                  >
-                    <Download className="w-4 h-4 mr-2" /> Download Recording
-                  </a>
-                </div>
-              </div>
-            )}
-
-            {selectedConvo.web_call_url && (
-              <div className="bg-gradient-to-r from-blue-50 to-cyan-50 p-6 rounded-xl border border-blue-200">
-                <label className="text-sm font-semibold text-blue-900 mb-3 block">Web Call Link</label>
-                <div className="space-y-3">
-                  <a
-                    href={selectedConvo.web_call_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center text-blue-600 hover:text-blue-800 font-medium text-sm transition-colors"
-                  >
-                    <Share2 className="w-4 h-4 mr-2" /> Open Call Link
-                  </a>
-                </div>
-              </div>
-            )}
-
-            {selectedConvo.transcript && (
-              <div>
-                <label className="text-sm font-semibold text-gray-700 mb-3 block">Transcript</label>
-                <div className="p-5 bg-gray-50 rounded-xl border border-gray-200 max-h-96 overflow-auto">
-                  <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{selectedConvo.transcript}</p>
-                </div>
-              </div>
-            )}
-
-            {selectedConvo.summary && (
-              <div>
-                <label className="text-sm font-semibold text-gray-700 mb-2 block">Summary</label>
-                <p className="text-base text-gray-600 leading-relaxed bg-blue-50 p-4 rounded-lg border border-blue-100">{selectedConvo.summary}</p>
-              </div>
-            )}
-
-            {selectedConvo.lead_details && (
-              <div>
-                <label className="text-sm font-semibold text-gray-700 mb-2 block">Lead Details</label>
-                <p className="text-base text-gray-600 leading-relaxed bg-green-50 p-4 rounded-lg border border-green-100">{selectedConvo.lead_details}</p>
-              </div>
-            )}
-
-            {selectedConvo.analysis && (
-              <div>
-                <label className="text-sm font-semibold text-gray-700 mb-3 block">AI Analysis</label>
-                <pre className="text-xs bg-gray-900 text-gray-100 p-4 rounded-xl overflow-auto max-h-64 border border-gray-700">
-                  {JSON.stringify(selectedConvo.analysis, null, 2)}
-                </pre>
-              </div>
-            )}
-          </div>
-        </Modal>
-      )}
 
       {/* Delete Confirmation */}
       <DeleteConfirm

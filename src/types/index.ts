@@ -135,6 +135,9 @@ export interface VoiceConversation {
   stereo_recording_url: string
   web_call_url: string
   analysis: Record<string, unknown>
+  analysis_status: 'not_started' | 'processing' | 'completed' | 'failed'
+  analysis_generated_at: string | null
+  analysis_error: string | null
   artifact: Record<string, unknown>
   transport: Record<string, unknown>
   monitor: Record<string, unknown>

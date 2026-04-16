@@ -1,19 +1,19 @@
 ﻿'use client'
 
 import { useEffect, useState } from 'react'
-import { FileText, Mail, MailCheck, Building2, User, Clock, Globe, Calendar, MapPin } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { FileText } from 'lucide-react'
 import DataTable from '@/components/DataTable'
-import Modal from '@/components/Modal'
 import DeleteConfirm from '@/components/DeleteConfirm'
 import { DemoRequest } from '@/types'
 import { formatDate } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 export default function DemoRequestsPage() {
+  const router = useRouter()
   const [demoRequests, setDemoRequests] = useState<DemoRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedDemo, setSelectedDemo] = useState<DemoRequest | null>(null)
-  const [viewModalOpen, setViewModalOpen] = useState(false)
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [mailFilter, setMailFilter] = useState<string>('all')
@@ -181,8 +181,7 @@ export default function DemoRequestsPage() {
         data={filteredAndSortedData}
         columns={columns}
         onView={(row) => {
-          setSelectedDemo(row)
-          setViewModalOpen(true)
+          router.push(`/admin/demo-requests/${row.id}`)
         }}
         onDelete={(row) => {
           setSelectedDemo(row)
@@ -190,138 +189,6 @@ export default function DemoRequestsPage() {
         }}
         searchKeys={['name', 'email', 'company']}
       />
-
-      {/* View Modal */}
-      {selectedDemo && (
-        <Modal
-          isOpen={viewModalOpen}
-          onClose={() => setViewModalOpen(false)}
-          title="Demo Request Details"
-          size="lg"
-        >
-          <div className="space-y-6">
-            {/* Contact Information */}
-            <div className="bg-gradient-to-br from-blue-50 to-cyan-50 rounded-xl p-6 border border-blue-200">
-              <h3 className="text-lg font-bold text-blue-900 mb-4 flex items-center gap-2">
-                <User className="w-5 h-5" />
-                Contact Information
-              </h3>
-              <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-blue-700 uppercase tracking-wider flex items-center gap-1">
-                    <User className="w-3 h-3" /> Name
-                  </label>
-                  <p className="text-base font-semibold text-gray-900">{selectedDemo.name}</p>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-blue-700 uppercase tracking-wider flex items-center gap-1">
-                    <Mail className="w-3 h-3" /> Email
-                  </label>
-                  <p className="text-base text-gray-900">{selectedDemo.email}</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Company Information */}
-            <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-6 border border-purple-200">
-              <h3 className="text-lg font-bold text-purple-900 mb-4 flex items-center gap-2">
-                <Building2 className="w-5 h-5" />
-                Company Information
-              </h3>
-              <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-purple-700 uppercase tracking-wider flex items-center gap-1">
-                    <Building2 className="w-3 h-3" /> Company
-                  </label>
-                  <p className="text-base font-semibold text-gray-900">{selectedDemo.company}</p>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-purple-700 uppercase tracking-wider flex items-center gap-1">
-                    <User className="w-3 h-3" /> Role
-                  </label>
-                  <p className="text-base text-gray-900">{selectedDemo.role}</p>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-purple-700 uppercase tracking-wider">Team Size</label>
-                  <p className="text-base font-medium text-gray-900">{selectedDemo.team_size}</p>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-purple-700 uppercase tracking-wider flex items-center gap-1">
-                    <Globe className="w-3 h-3" /> Website
-                  </label>
-                  {selectedDemo.company_website ? (
-                    <a href={selectedDemo.company_website} target="_blank" rel="noopener noreferrer" className="text-base text-primary-600 hover:text-primary-800 hover:underline">
-                      {selectedDemo.company_website}
-                    </a>
-                  ) : (
-                    <p className="text-base text-gray-500">-</p>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Scheduling Information */}
-            <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl p-6 border border-green-200">
-              <h3 className="text-lg font-bold text-green-900 mb-4 flex items-center gap-2">
-                <Calendar className="w-5 h-5" />
-                Scheduling Information
-              </h3>
-              <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-green-700 uppercase tracking-wider flex items-center gap-1">
-                    <Calendar className="w-3 h-3" /> Preferred Date
-                  </label>
-                  <p className="text-base font-medium text-gray-900">{selectedDemo.preferred_date || '-'}</p>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-green-700 uppercase tracking-wider flex items-center gap-1">
-                    <Clock className="w-3 h-3" /> Preferred Time
-                  </label>
-                  <p className="text-base font-medium text-gray-900">{selectedDemo.preferred_time || '-'}</p>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-green-700 uppercase tracking-wider flex items-center gap-1">
-                    <MapPin className="w-3 h-3" /> Timezone
-                  </label>
-                  <p className="text-base font-medium text-gray-900">{selectedDemo.timezone || '-'}</p>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-green-700 uppercase tracking-wider flex items-center gap-1">
-                    {selectedDemo.mail_sent ? <MailCheck className="w-3 h-3" /> : <Mail className="w-3 h-3" />} Mail Sent
-                  </label>
-                  <p className="mt-1">
-                    <span className={`badge ${selectedDemo.mail_sent ? 'badge-success' : 'badge-warning'}`}>
-                      {selectedDemo.mail_sent ? 'Yes' : 'No'}
-                    </span>
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Notes */}
-            {selectedDemo.notes && (
-              <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-6 border border-amber-200">
-                <label className="text-sm font-bold text-amber-900 mb-3 block flex items-center gap-2">
-                  <FileText className="w-4 h-4" /> Notes
-                </label>
-                <p className="text-base text-gray-700 leading-relaxed bg-white p-4 rounded-lg border border-amber-100">{selectedDemo.notes}</p>
-              </div>
-            )}
-
-            {/* Company Info */}
-            {selectedDemo.company_scraped_info && (
-              <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl p-6 border border-gray-300">
-                <label className="text-sm font-bold text-gray-900 mb-3 block flex items-center gap-2">
-                  <Building2 className="w-4 h-4" /> Company Info (Scraped)
-                </label>
-                <pre className="text-xs bg-gray-900 text-gray-100 p-4 rounded-xl overflow-auto max-h-64 border border-gray-700 leading-relaxed">
-                  {JSON.stringify(selectedDemo.company_scraped_info, null, 2)}
-                </pre>
-              </div>
-            )}
-          </div>
-        </Modal>
-      )}
 
       {/* Delete Confirmation */}
       <DeleteConfirm
