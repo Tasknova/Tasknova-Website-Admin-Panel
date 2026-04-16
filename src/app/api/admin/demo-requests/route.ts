@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
 
     const { data, error } = await supabase
       .from('demo_requests')
-      .select('*')
+      .select('id, name, email, company, role, team_size, mail_sent, created_at')
       .order('created_at', { ascending: false })
 
     if (error) throw error

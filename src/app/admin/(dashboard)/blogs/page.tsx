@@ -55,6 +55,47 @@ export default function BlogsPage() {
     }
   }
 
+  const fetchBlogDetails = async (id: string): Promise<Blog | null> => {
+    try {
+      const res = await fetch(`/api/admin/blogs?id=${id}`)
+      if (!res.ok) throw new Error('Request failed')
+      return await res.json()
+    } catch {
+      toast.error('Failed to load blog details')
+      return null
+    }
+  }
+
+  const handleViewBlog = async (row: Blog) => {
+    const detailed = await fetchBlogDetails(row.id)
+    if (!detailed) return
+
+    setSelectedBlog(detailed)
+    setViewModalOpen(true)
+  }
+
+  const handleEditBlog = async (row: Blog) => {
+    const detailed = await fetchBlogDetails(row.id)
+    if (!detailed) return
+
+    setSelectedBlog(detailed)
+    setFormData({
+      title: detailed.title,
+      slug: detailed.slug,
+      excerpt: detailed.excerpt || '',
+      content: detailed.content || '',
+      hero_image_url: detailed.hero_image_url || '',
+      author: detailed.author,
+      author_role: detailed.author_role || '',
+      author_avatar_url: detailed.author_avatar_url || '',
+      category: detailed.category,
+      tags: detailed.tags || [],
+      read_time: detailed.read_time,
+      is_published: detailed.is_published
+    })
+    setEditModalOpen(true)
+  }
+
   const handleDelete = async () => {
     if (!selectedBlog) return
 
@@ -322,28 +363,8 @@ export default function BlogsPage() {
       <DataTable
         data={filteredAndSortedData}
         columns={columns}
-        onView={(row) => {
-          setSelectedBlog(row)
-          setViewModalOpen(true)
-        }}
-        onEdit={(row) => {
-          setSelectedBlog(row)
-          setFormData({
-            title: row.title,
-            slug: row.slug,
-            excerpt: row.excerpt || '',
-            content: row.content || '',
-            hero_image_url: row.hero_image_url || '',
-            author: row.author,
-            author_role: row.author_role || '',
-            author_avatar_url: row.author_avatar_url || '',
-            category: row.category,
-            tags: row.tags || [],
-            read_time: row.read_time,
-            is_published: row.is_published
-          })
-          setEditModalOpen(true)
-        }}
+        onView={handleViewBlog}
+        onEdit={handleEditBlog}
         onDelete={(row) => {
           setSelectedBlog(row)
           setDeleteModalOpen(true)

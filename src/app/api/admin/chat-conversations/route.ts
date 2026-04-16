@@ -13,7 +13,7 @@ export async function GET() {
   try {
     const { data, error } = await supabase
       .from('chat_conversations')
-      .select('*')
+      .select('id, session_id, user_id, agent_id, messages, created_at')
       .order('created_at', { ascending: false })
 
     if (error) throw error

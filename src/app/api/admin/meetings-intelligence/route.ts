@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
     const [{ data: intelligenceRows, error: intelligenceError }, { data: standups, error: standupsError }] = await Promise.all([
       supabase
         .from('meetings_intelligence')
-        .select('*')
+        .select('id, meeting_id, tasks_completed, sentiment_score, meeting_efficiency_score, key_insights, created_at')
         .order('created_at', { ascending: false }),
       supabase
         .from('daily_standup_meetings')

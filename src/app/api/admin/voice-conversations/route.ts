@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
 
     const { data, error } = await supabase
       .from('voice_conversations')
-      .select('*')
+      .select('id, customer_name, customer_email, customer_phone, status, duration_seconds, cost, started_at, created_at')
       .order('created_at', { ascending: false })
 
     if (error) throw error

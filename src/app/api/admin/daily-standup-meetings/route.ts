@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
 
     const { data, error } = await supabase
       .from('daily_standup_meetings')
-      .select('*')
+      .select('id, meeting_title, meeting_date, meeting_duration, processed, processing_error, created_at')
       .order('created_at', { ascending: false })
 
     if (error) throw error

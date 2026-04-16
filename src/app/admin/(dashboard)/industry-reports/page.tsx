@@ -39,6 +39,45 @@ export default function IndustryReportsPage() {
     }
   }
 
+  const fetchReportDetails = async (id: string): Promise<IndustryReport | null> => {
+    try {
+      const res = await fetch(`/api/admin/industry-reports?id=${id}`)
+      if (!res.ok) throw new Error('Request failed')
+      return await res.json()
+    } catch {
+      toast.error('Failed to load report details')
+      return null
+    }
+  }
+
+  const handleViewReport = async (row: IndustryReport) => {
+    const detailed = await fetchReportDetails(row.id)
+    if (!detailed) return
+
+    setSelectedReport(detailed)
+    setViewModalOpen(true)
+  }
+
+  const handleEditReport = async (row: IndustryReport) => {
+    const detailed = await fetchReportDetails(row.id)
+    if (!detailed) return
+
+    setSelectedReport(detailed)
+    setFormData({
+      title: detailed.title,
+      slug: detailed.slug,
+      description: detailed.description || '',
+      year: detailed.year,
+      pages: detailed.pages,
+      gradient: detailed.gradient || '',
+      icon: detailed.icon || '',
+      key_findings: detailed.key_findings || [],
+      pdf_url: detailed.pdf_url || '',
+      is_published: detailed.is_published
+    })
+    setEditModalOpen(true)
+  }
+
   const handleCreate = async () => {
     try {
       const payload = {
@@ -273,26 +312,8 @@ export default function IndustryReportsPage() {
       <DataTable
         data={filteredAndSortedData}
         columns={columns}
-        onView={(row) => {
-          setSelectedReport(row)
-          setViewModalOpen(true)
-        }}
-        onEdit={(row) => {
-          setSelectedReport(row)
-          setFormData({
-            title: row.title,
-            slug: row.slug,
-            description: row.description || '',
-            year: row.year,
-            pages: row.pages,
-            gradient: row.gradient || '',
-            icon: row.icon || '',
-            key_findings: row.key_findings || [],
-            pdf_url: row.pdf_url || '',
-            is_published: row.is_published
-          })
-          setEditModalOpen(true)
-        }}
+        onView={handleViewReport}
+        onEdit={handleEditReport}
         onDelete={(row) => {
           setSelectedReport(row)
           setDeleteModalOpen(true)

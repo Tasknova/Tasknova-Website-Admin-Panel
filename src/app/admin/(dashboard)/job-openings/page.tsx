@@ -52,6 +52,44 @@ export default function JobOpeningsPage() {
     }
   }
 
+  const fetchJobDetails = async (id: string): Promise<JobOpening | null> => {
+    try {
+      const res = await fetch(`/api/admin/job-openings?id=${id}`)
+      if (!res.ok) throw new Error('Request failed')
+      return await res.json()
+    } catch {
+      toast.error('Failed to load job details')
+      return null
+    }
+  }
+
+  const handleViewJob = async (row: JobOpening) => {
+    const detailed = await fetchJobDetails(row.id)
+    if (!detailed) return
+
+    setSelectedJob(detailed)
+    setViewModalOpen(true)
+  }
+
+  const handleOpenEditJob = async (row: JobOpening) => {
+    const detailed = await fetchJobDetails(row.id)
+    if (!detailed) return
+
+    setSelectedJob(detailed)
+    setFormData({
+      title: detailed.title,
+      department: detailed.department,
+      location: detailed.location,
+      type: detailed.type,
+      description: detailed.description,
+      about: detailed.about,
+      responsibilities: detailed.responsibilities || [],
+      skills: detailed.skills || [],
+      is_active: detailed.is_active
+    })
+    setEditModalOpen(true)
+  }
+
   const handleDelete = async () => {
     if (!selectedJob) return
 
@@ -314,25 +352,8 @@ export default function JobOpeningsPage() {
       <DataTable
         data={filteredAndSortedData}
         columns={columns}
-        onView={(row) => {
-          setSelectedJob(row)
-          setViewModalOpen(true)
-        }}
-        onEdit={(row) => {
-          setSelectedJob(row)
-          setFormData({
-            title: row.title,
-            department: row.department,
-            location: row.location,
-            type: row.type,
-            description: row.description,
-            about: row.about,
-            responsibilities: row.responsibilities || [],
-            skills: row.skills || [],
-            is_active: row.is_active
-          })
-          setEditModalOpen(true)
-        }}
+        onView={handleViewJob}
+        onEdit={handleOpenEditJob}
         onDelete={(row) => {
           setSelectedJob(row)
           setDeleteModalOpen(true)

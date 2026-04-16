@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
 
     const { data, error } = await supabase
       .from('job_applicants')
-      .select('*')
+      .select('id, full_name, email, phone, experience_years, analysis_status, ai_score, created_at')
       .order('created_at', { ascending: false })
 
     if (error) throw error

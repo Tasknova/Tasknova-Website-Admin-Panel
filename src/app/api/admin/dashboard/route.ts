@@ -16,8 +16,8 @@ export async function GET() {
     const [
       { count: demoCount },
       { count: applicantCount },
-      { data: jobs },
-      { data: blogs },
+      { count: activeJobsCount },
+      { count: publishedBlogsCount },
       { count: playbookCount },
       { count: reportCount },
       { count: voiceCount },
@@ -25,8 +25,8 @@ export async function GET() {
     ] = await Promise.all([
       supabase.from('demo_requests').select('*', { count: 'exact', head: true }),
       supabase.from('job_applicants').select('*', { count: 'exact', head: true }),
-      supabase.from('job_openings').select('*', { count: 'exact' }),
-      supabase.from('blogs').select('*', { count: 'exact' }),
+      supabase.from('job_openings').select('*', { count: 'exact', head: true }).eq('is_active', true),
+      supabase.from('blogs').select('*', { count: 'exact', head: true }).eq('is_published', true),
       supabase.from('playbooks').select('*', { count: 'exact', head: true }),
       supabase.from('industry_reports').select('*', { count: 'exact', head: true }),
       supabase.from('voice_conversations').select('*', { count: 'exact', head: true }),
@@ -36,37 +36,28 @@ export async function GET() {
     // Fetch recent data
     const { data: recentDemos } = await supabase
       .from('demo_requests')
-      .select('*')
+      .select('id, name, company, created_at')
       .order('created_at', { ascending: false })
       .limit(5)
 
     const { data: recentApplicants } = await supabase
       .from('job_applicants')
-      .select('*')
+      .select('id, full_name, email, created_at')
       .order('created_at', { ascending: false })
       .limit(5)
 
     const { data: recentVoiceCalls } = await supabase
       .from('voice_conversations')
-      .select('*')
+      .select('id, customer_name, customer_email, status, duration_seconds, created_at')
       .order('created_at', { ascending: false })
       .limit(5)
-
-    interface JobRecord {
-      is_active: boolean;
-    }
-    interface BlogRecord {
-      is_published: boolean;
-    }
-    const activeJobs = jobs?.filter((job: JobRecord) => job.is_active).length || 0
-    const publishedBlogs = blogs?.filter((blog: BlogRecord) => blog.is_published).length || 0
 
     return NextResponse.json({
       stats: {
         totalDemoRequests: demoCount || 0,
         totalJobApplicants: applicantCount || 0,
-        activeJobOpenings: activeJobs,
-        publishedBlogs: publishedBlogs,
+        activeJobOpenings: activeJobsCount || 0,
+        publishedBlogs: publishedBlogsCount || 0,
         totalPlaybooks: playbookCount || 0,
         totalReports: reportCount || 0,
         totalVoiceConversations: voiceCount || 0,

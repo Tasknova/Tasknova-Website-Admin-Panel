@@ -38,6 +38,43 @@ export default function PlaybooksPage() {
     }
   }
 
+  const fetchPlaybookDetails = async (id: string): Promise<Playbook | null> => {
+    try {
+      const res = await fetch(`/api/admin/playbooks?id=${id}`)
+      if (!res.ok) throw new Error('Request failed')
+      return await res.json()
+    } catch {
+      toast.error('Failed to load playbook details')
+      return null
+    }
+  }
+
+  const handleViewPlaybook = async (row: Playbook) => {
+    const detailed = await fetchPlaybookDetails(row.id)
+    if (!detailed) return
+
+    setSelectedPlaybook(detailed)
+    setViewModalOpen(true)
+  }
+
+  const handleEditPlaybook = async (row: Playbook) => {
+    const detailed = await fetchPlaybookDetails(row.id)
+    if (!detailed) return
+
+    setSelectedPlaybook(detailed)
+    setFormData({
+      title: detailed.title,
+      slug: detailed.slug,
+      description: detailed.description || '',
+      topics: detailed.topics || [],
+      pages: detailed.pages,
+      gradient: detailed.gradient || '',
+      file_path: detailed.file_path || '',
+      file_url: detailed.file_url || ''
+    })
+    setEditModalOpen(true)
+  }
+
   const handleCreate = async () => {
     try {
       const payload = {
@@ -220,24 +257,8 @@ export default function PlaybooksPage() {
       <DataTable
         data={sortedData}
         columns={columns}
-        onView={(row) => {
-          setSelectedPlaybook(row)
-          setViewModalOpen(true)
-        }}
-        onEdit={(row) => {
-          setSelectedPlaybook(row)
-          setFormData({
-            title: row.title,
-            slug: row.slug,
-            description: row.description || '',
-            topics: row.topics || [],
-            pages: row.pages,
-            gradient: row.gradient || '',
-            file_path: row.file_path || '',
-            file_url: row.file_url || ''
-          })
-          setEditModalOpen(true)
-        }}
+        onView={handleViewPlaybook}
+        onEdit={handleEditPlaybook}
         onDelete={(row) => {
           setSelectedPlaybook(row)
           setDeleteModalOpen(true)
