@@ -345,6 +345,7 @@ export default function DemoRequestDetailPage() {
     () => parseScrapedInfo(demoRequest?.company_scraped_info),
     [demoRequest?.company_scraped_info]
   )
+  const hasScrapedInfo = scrapedInfo !== null && scrapedInfo !== undefined
 
   const scrapedSummaryItems = useMemo(
     () =>
@@ -515,7 +516,7 @@ export default function DemoRequestDetailPage() {
         </div>
       )}
 
-      {scrapedInfo && (
+      {hasScrapedInfo && (
         <div className="bg-gradient-to-br from-gray-50 to-slate-100 rounded-xl p-6 border border-gray-300">
           <p className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
             <Building2 className="w-5 h-5" /> Company Info (Scraped)

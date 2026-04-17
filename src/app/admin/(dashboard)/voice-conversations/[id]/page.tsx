@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import {
@@ -202,8 +202,9 @@ export default function VoiceConversationDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
-  const runAnalysis = async (force = false) => {
-    if (!conversation?.id) return
+  const runAnalysis = useCallback(async (force = false) => {
+    const conversationId = conversation?.id
+    if (!conversationId) return
 
     setAnalyzing(true)
     try {
@@ -212,7 +213,7 @@ export default function VoiceConversationDetailPage() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ id: conversation.id, force }),
+        body: JSON.stringify({ id: conversationId, force }),
       })
 
       const data = await res.json()
@@ -231,7 +232,7 @@ export default function VoiceConversationDetailPage() {
     } finally {
       setAnalyzing(false)
     }
-  }
+  }, [conversation?.id])
 
   useEffect(() => {
     if (!conversation || autoAnalysisTried) return
@@ -241,9 +242,10 @@ export default function VoiceConversationDetailPage() {
       setAutoAnalysisTried(true)
       void runAnalysis(false)
     }
-  }, [conversation, autoAnalysisTried])
+  }, [conversation, autoAnalysisTried, runAnalysis])
 
   const parsedAnalysis = useMemo(() => parseAnalysis(conversation?.analysis), [conversation?.analysis])
+  const hasParsedAnalysis = parsedAnalysis !== null && parsedAnalysis !== undefined
 
   const analysisOverview = isRecord(parsedAnalysis)
     ? {
@@ -438,13 +440,13 @@ export default function VoiceConversationDetailPage() {
           </div>
         )}
 
-        {!parsedAnalysis && !analyzing && (
+        {!hasParsedAnalysis && !analyzing && (
           <div className="rounded-lg border border-violet-200 bg-white p-4">
             <p className="text-sm text-violet-800">No analysis available yet. Use Re-run Analysis to generate one.</p>
           </div>
         )}
 
-        {parsedAnalysis && isRecord(parsedAnalysis) && analysisOverview && (
+        {hasParsedAnalysis && isRecord(parsedAnalysis) && analysisOverview && (
           <div className="space-y-4">
             {analysisOverview.overallSummary && (
               <div className="rounded-lg border border-violet-200 bg-white p-4">
@@ -541,7 +543,7 @@ export default function VoiceConversationDetailPage() {
           </div>
         )}
 
-        {parsedAnalysis && !isRecord(parsedAnalysis) && (
+        {hasParsedAnalysis && !isRecord(parsedAnalysis) && (
           <div className="rounded-lg border border-violet-200 bg-white p-4">
             <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">{formatPrimitive(parsedAnalysis)}</p>
           </div>

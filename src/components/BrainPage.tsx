@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Trash2, Pin, PinOff, Check, X } from 'lucide-react';
 import {
@@ -135,35 +135,58 @@ export default function BrainPage({ onBack }: BrainPageProps) {
   }>>([]);
   const [searching, setSearching] = useState(false);
 
+  const loadContextMemories = useCallback(async () => {
+    if (!userId) return;
+    setContextLoading(true);
+    try {
+      const params = new URLSearchParams({
+        filter: contextFilter,
+        approvalStatus: contextApprovalFilter,
+        sort: contextSortBy,
+        includePending: 'true',
+      });
+      const res = await fetch(`/api/admin/company-context-memory?${params.toString()}`);
+      if (!res.ok) throw new Error('Failed to fetch company context memory');
+      const data = await res.json();
+      setContextMemories(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error('Error loading context memories:', error);
+    } finally {
+      setContextLoading(false);
+    }
+  }, [userId, contextFilter, contextApprovalFilter, contextSortBy]);
+
+  // Run once on mount to hydrate admin session and base datasets.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    initializeUser();
+    const initializeUser = async () => {
+      try {
+        const res = await fetch('/api/auth/session');
+        const data = await res.json();
+        if (data.authenticated && data.admin) {
+          setUserId(data.admin.id);
+          await loadCompanyBrain(data.admin.id);
+          await loadDocuments(data.admin.id);
+          await loadGroups(data.admin.id);
+        }
+      } catch (error) {
+        console.error('Failed to fetch session:', error);
+      }
+    };
+
+    void initializeUser();
   }, []);
   
   useEffect(() => {
     if (activeTab === 'context-memory' && userId) {
-      loadContextMemories();
+      void loadContextMemories();
     }
-  }, [activeTab, contextFilter, contextApprovalFilter, contextSortBy, userId]);
+  }, [activeTab, userId, loadContextMemories]);
 
   useEffect(() => {
     // Auto-scroll to bottom when new messages arrive
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
-
-  async function initializeUser() {
-    try {
-      const res = await fetch('/api/auth/session');
-      const data = await res.json();
-      if (data.authenticated && data.admin) {
-        setUserId(data.admin.id);
-        await loadCompanyBrain(data.admin.id);
-        await loadDocuments(data.admin.id);
-        await loadGroups(data.admin.id);
-      }
-    } catch (error) {
-      console.error('Failed to fetch session:', error);
-    }
-  }
 
   async function loadCompanyBrain(uid: string) {
     try {
@@ -207,27 +230,6 @@ export default function BrainPage({ onBack }: BrainPageProps) {
       setGroups(data || []);
     } catch (error) {
       console.error('Error loading groups:', error);
-    }
-  }
-
-  async function loadContextMemories() {
-    if (!userId) return;
-    setContextLoading(true);
-    try {
-      const params = new URLSearchParams({
-        filter: contextFilter,
-        approvalStatus: contextApprovalFilter,
-        sort: contextSortBy,
-        includePending: 'true',
-      });
-      const res = await fetch(`/api/admin/company-context-memory?${params.toString()}`);
-      if (!res.ok) throw new Error('Failed to fetch company context memory');
-      const data = await res.json();
-      setContextMemories(Array.isArray(data) ? data : []);
-    } catch (error) {
-      console.error('Error loading context memories:', error);
-    } finally {
-      setContextLoading(false);
     }
   }
 

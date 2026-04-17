@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef } from 'react'
+import Image from 'next/image'
 import { Upload, X, Image as ImageIcon, Loader2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import toast from 'react-hot-toast'
@@ -92,9 +93,11 @@ export default function ImageUpload({
       
       {preview ? (
         <div className="relative group">
-          <img 
+          <Image
             src={preview} 
             alt="Preview" 
+            width={800}
+            height={384}
             className="w-full h-48 object-cover rounded-lg border border-gray-300"
           />
           <button

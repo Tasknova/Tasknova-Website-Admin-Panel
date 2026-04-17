@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Trash2, Pin, PinOff, Check, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import {
@@ -135,49 +135,81 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
   }>>([]);
   const [searching, setSearching] = useState(false);
 
+  const loadContextMemories = useCallback(async () => {
+    if (!userId) return;
+    setContextLoading(true);
+    try {
+      const params = new URLSearchParams({
+        projectId,
+        filter: contextFilter,
+        approvalStatus: contextApprovalFilter,
+        sort: contextSortBy,
+        includePending: 'true',
+      });
+      const res = await fetch(`/api/admin/project-context-memory?${params.toString()}`);
+      if (!res.ok) throw new Error('Failed to fetch project context memory');
+      const data = await res.json();
+      setContextMemories(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error('Error loading context memories:', error);
+    } finally {
+      setContextLoading(false);
+    }
+  }, [userId, projectId, contextFilter, contextApprovalFilter, contextSortBy]);
+
   useEffect(() => {
-    initializeProject();
+    const initializeProject = async () => {
+      try {
+        const res = await fetch('/api/auth/session');
+        const data = await res.json();
+        if (data.authenticated && data.admin) {
+          setUserId(data.admin.id);
+
+          const [projectResult, metadataResult, documentsResult] = await Promise.all([
+            supabase.from('projects').select('*').eq('id', projectId).single(),
+            supabase.from('project_metadata').select('*').eq('project_id', projectId).maybeSingle(),
+            supabase
+              .from('project_documents')
+              .select('*')
+              .eq('project_id', projectId)
+              .eq('is_deleted', false)
+              .order('created_at', { ascending: false }),
+          ]);
+
+          if (projectResult.error) {
+            throw projectResult.error;
+          }
+          setProject(projectResult.data);
+
+          if (metadataResult.error && metadataResult.error.code !== 'PGRST116') {
+            throw metadataResult.error;
+          }
+          if (metadataResult.data) {
+            setMetadata(metadataResult.data);
+          }
+
+          if (documentsResult.error) {
+            throw documentsResult.error;
+          }
+          setDocuments(documentsResult.data || []);
+        }
+      } catch (error) {
+        console.error('Failed to fetch session:', error);
+      }
+    };
+
+    void initializeProject();
   }, [projectId]);
   
   useEffect(() => {
     if (activeTab === 'context-memory' && userId) {
-      loadContextMemories();
+      void loadContextMemories();
     }
-  }, [activeTab, contextFilter, contextApprovalFilter, contextSortBy, userId]);
+  }, [activeTab, userId, loadContextMemories]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
-
-  async function initializeProject() {
-    try {
-      const res = await fetch('/api/auth/session');
-      const data = await res.json();
-      if (data.authenticated && data.admin) {
-        setUserId(data.admin.id);
-        await loadProject();
-        await loadMetadata();
-        await loadDocuments();
-      }
-    } catch (error) {
-      console.error('Failed to fetch session:', error);
-    }
-  }
-
-  async function loadProject() {
-    try {
-      const { data, error } = await supabase
-        .from('projects')
-        .select('*')
-        .eq('id', projectId)
-        .single();
-
-      if (error) throw error;
-      setProject(data);
-    } catch (error) {
-      console.error('Error loading project:', error);
-    }
-  }
 
   async function loadMetadata() {
     try {
@@ -207,28 +239,6 @@ export default function ProjectBrainPage({ projectId, onBack }: ProjectBrainPage
       setDocuments(data || []);
     } catch (error) {
       console.error('Error loading documents:', error);
-    }
-  }
-
-  async function loadContextMemories() {
-    if (!userId) return;
-    setContextLoading(true);
-    try {
-      const params = new URLSearchParams({
-        projectId,
-        filter: contextFilter,
-        approvalStatus: contextApprovalFilter,
-        sort: contextSortBy,
-        includePending: 'true',
-      });
-      const res = await fetch(`/api/admin/project-context-memory?${params.toString()}`);
-      if (!res.ok) throw new Error('Failed to fetch project context memory');
-      const data = await res.json();
-      setContextMemories(Array.isArray(data) ? data : []);
-    } catch (error) {
-      console.error('Error loading context memories:', error);
-    } finally {
-      setContextLoading(false);
     }
   }
 
