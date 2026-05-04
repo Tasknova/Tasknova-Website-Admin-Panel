@@ -19,7 +19,8 @@ import {
   Brain,
   FolderKanban,
   ClipboardList,
-  BrainCircuit
+  BrainCircuit,
+  Wand2
 } from 'lucide-react'
 import { useState } from 'react'
 import toast from 'react-hot-toast'
@@ -38,6 +39,7 @@ const navigation = [
   { name: 'Project Brain', href: '/admin/project-brain', icon: FolderKanban },
   { name: 'Daily Standup Meetings', href: '/admin/daily-standup-meetings', icon: ClipboardList },
   { name: 'Meetings Intelligence', href: '/admin/meetings-intelligence', icon: BrainCircuit },
+  { name: 'AI Calling Agents', href: '/admin/ai-calling-agents', icon: Wand2 },
   { name: 'Admins', href: '/admin/admins', icon: Shield },
 ]
 
