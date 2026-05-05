@@ -13,7 +13,7 @@ import {
   Legend,
 } from 'chart.js'
 import toast from 'react-hot-toast'
-import { TrendingUp, AlertCircle, CheckCircle, Clock } from 'lucide-react'
+import { TrendingUp, AlertCircle, CheckCircle, Clock, RefreshCw } from 'lucide-react'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, ArcElement, Title, Tooltip, Legend)
 
@@ -41,6 +41,7 @@ interface DashboardMetrics {
 export default function DashboardTab() {
   const [data, setData] = useState<DashboardMetrics | null>(null)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
 
   useEffect(() => {
     fetchDashboardData()
@@ -49,16 +50,25 @@ export default function DashboardTab() {
   const fetchDashboardData = async () => {
     try {
       setLoading(true)
-      const response = await fetch('/api/ai-agents/dashboard')
+      const response = await fetch('/api/ai-agents/dashboard', {
+        cache: 'no-store',
+      })
       if (!response.ok) throw new Error('Failed to fetch dashboard data')
       const result = await response.json()
+      console.log('Dashboard API Response:', result)
       setData(result)
     } catch (error) {
       console.error('Error fetching dashboard data:', error)
       toast.error('Failed to load dashboard data')
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
+  }
+
+  const handleRefresh = () => {
+    setRefreshing(true)
+    fetchDashboardData()
   }
 
   if (loading) {
@@ -122,6 +132,18 @@ export default function DashboardTab() {
 
   return (
     <div className="space-y-6">
+      {/* Refresh Button */}
+      <div className="flex justify-end">
+        <button
+          onClick={handleRefresh}
+          disabled={refreshing}
+          className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+        >
+          <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+          {refreshing ? 'Refreshing...' : 'Refresh'}
+        </button>
+      </div>
+
       {/* Key Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard

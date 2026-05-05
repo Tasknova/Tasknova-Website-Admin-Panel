@@ -6,29 +6,57 @@ export async function GET() {
     const client = createServerClient()
 
     // Get all calls
-    const { data: allCalls } = await client
+    const { data: allCalls, error: callsError } = await client
       .from('ai_calls')
-      .select('call_id, call_type, status, duration, agent_id, created_at')
+      .select('*')
+
+    if (callsError) {
+      console.error('Error fetching calls:', callsError)
+    }
 
     // Get all evaluations
-    const { data: allEvaluations } = await client
+    const { data: allEvaluations, error: evaluationsError } = await client
       .from('ai_evaluations')
       .select('score, call_id, issues')
 
+    if (evaluationsError) {
+      console.error('Error fetching evaluations:', evaluationsError)
+    }
+
     // Get all agents
-    const { data: allAgents } = await client
+    const { data: allAgents, error: agentsError } = await client
       .from('ai_agents')
       .select('agent_id, name')
+
+    if (agentsError) {
+      console.error('Error fetching agents:', agentsError)
+    }
 
     const calls = allCalls || []
     const evaluations = allEvaluations || []
     const agents = allAgents || []
+
+    console.log('Dashboard Data:', {
+      totalCalls: calls.length,
+      totalEvaluations: evaluations.length,
+      totalAgents: agents.length,
+      callsData: calls,
+    })
 
     // Calculate metrics
     const totalCalls = calls.length
     const validCalls = calls.filter((c) => c.call_type === 'valid').length
     const failedCalls = calls.filter((c) => c.call_type === 'failed').length
     const invalidCalls = calls.filter((c) => c.call_type === 'invalid').length
+
+    console.log('Metric Breakdown:', {
+      totalCalls,
+      validCalls,
+      failedCalls,
+      invalidCalls,
+      callTypes: calls.map((c) => c.call_type),
+      callStatuses: calls.map((c) => c.status),
+    })
 
     const avgEvaluationScore =
       evaluations.length > 0

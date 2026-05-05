@@ -292,41 +292,67 @@ function AgentDetail({ agent, onBack }: { agent: Agent; onBack: () => void }) {
             <div className="space-y-6">
               {/* Basic Information */}
               <div className="grid grid-cols-2 gap-4">
-                <DetailItem label="Agent Name" value={agentDetails.remote.agent_name as string} />
-                <DetailItem label="Agent Type" value={agentDetails.remote.agent_type as string} />
-                <DetailItem label="Agent ID" value={agentDetails.remote.agent_id as string} />
+                <DetailItem
+                  label="Agent Name"
+                  value={String(agentDetails.remote.agent_name || '')}
+                />
+                <DetailItem
+                  label="Agent Type"
+                  value={String(agentDetails.remote.agent_type || '')}
+                />
+                <DetailItem
+                  label="Agent ID"
+                  value={String(agentDetails.remote.agent_id || '')}
+                />
                 <DetailItem
                   label="Status"
-                  value={agentDetails.remote.is_active ? 'Active' : 'Inactive'}
-                  valueColor={agentDetails.remote.is_active ? 'text-green-600' : 'text-red-600'}
+                  value={(agentDetails.remote?.is_active as boolean) ? 'Active' : 'Inactive'}
+                  valueColor={(agentDetails.remote?.is_active as boolean) ? 'text-green-600' : 'text-red-600'}
                 />
               </div>
 
               {/* Description */}
-              {agentDetails.remote.agent_description && (
+              {(agentDetails.remote?.agent_description as string) && (
                 <div className="bg-gray-50 rounded-lg p-4">
                   <p className="text-sm font-medium text-gray-700 mb-2">Description</p>
-                  <p className="text-sm text-gray-600">{agentDetails.remote.agent_description as string}</p>
+                  <p className="text-sm text-gray-600">{String(agentDetails.remote.agent_description)}</p>
                 </div>
               )}
 
               {/* Organization & Team */}
               <div className="grid grid-cols-2 gap-4">
-                <DetailItem label="Organization ID" value={agentDetails.remote.organization_id as string} />
-                <DetailItem label="User ID" value={agentDetails.remote.user_id as string} />
+                <DetailItem
+                  label="Organization ID"
+                  value={String(agentDetails.remote.organization_id || '')}
+                />
+                <DetailItem
+                  label="User ID"
+                  value={String(agentDetails.remote.user_id || '')}
+                />
                 <DetailItem
                   label="Team Size"
-                  value={(agentDetails.remote.team_size as number).toString()}
+                  value={String(agentDetails.remote.team_size || '0')}
                 />
-                <DetailItem label="WhatsApp Enabled" value={agentDetails.remote.whatsapp_enabled ? 'Yes' : 'No'} />
+                <DetailItem
+                  label="WhatsApp Enabled"
+                  value={(agentDetails.remote?.whatsapp_enabled as boolean) ? 'Yes' : 'No'}
+                />
               </div>
 
               {/* LiveKit Configuration */}
               <div className="border-t pt-4">
                 <h4 className="font-semibold text-gray-900 mb-3">LiveKit Configuration</h4>
                 <div className="grid grid-cols-2 gap-4">
-                  <DetailItem label="LiveKit API Key" value={agentDetails.remote.livekit_api_key as string} monospace />
-                  <DetailItem label="LiveKit Host" value={agentDetails.remote.livekit_host_url as string} monospace />
+                  <DetailItem
+                    label="LiveKit API Key"
+                    value={String(agentDetails.remote.livekit_api_key || '')}
+                    monospace
+                  />
+                  <DetailItem
+                    label="LiveKit Host"
+                    value={String(agentDetails.remote.livekit_host_url || '')}
+                    monospace
+                  />
                 </div>
               </div>
 
@@ -336,12 +362,12 @@ function AgentDetail({ agent, onBack }: { agent: Agent; onBack: () => void }) {
                 <div className="grid grid-cols-2 gap-4">
                   <DetailItem
                     label="Created At"
-                    value={new Date(agentDetails.remote.created_at as string).toLocaleString()}
+                    value={new Date(String(agentDetails.remote.created_at)).toLocaleString()}
                     small
                   />
                   <DetailItem
                     label="Updated At"
-                    value={new Date(agentDetails.remote.updated_at as string).toLocaleString()}
+                    value={new Date(String(agentDetails.remote.updated_at)).toLocaleString()}
                     small
                   />
                 </div>
@@ -350,7 +376,7 @@ function AgentDetail({ agent, onBack }: { agent: Agent; onBack: () => void }) {
               {/* Cost Information */}
               <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
                 <p className="text-sm font-medium text-blue-900 mb-1">Agent Cost</p>
-                <p className="text-2xl font-bold text-blue-600">${agentDetails.remote.agent_cost}</p>
+                <p className="text-2xl font-bold text-blue-600">${String(agentDetails.remote?.agent_cost || '0')}</p>
               </div>
             </div>
           ) : (
