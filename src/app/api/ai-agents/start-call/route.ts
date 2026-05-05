@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
     const callId = induslabsData.call_id || `call_${Date.now()}`
 
     // Store call in database
-    const { data, error } = await client
+    const { error } = await client
       .from('ai_calls')
       .insert({
         call_id: callId,

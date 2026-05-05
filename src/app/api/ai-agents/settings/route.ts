@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@/lib/supabase'
 import { logAuditEvent } from '@/lib/aiAgentsUtils'
 
+interface Setting {
+  setting_key: string
+  setting_value: string
+}
+
 export async function GET(req: NextRequest) {
   try {
     const client = createServerClient()
@@ -39,7 +44,7 @@ export async function GET(req: NextRequest) {
       }
 
       // Mask API keys in response
-      const maskedSettings = data.map((setting: any) => ({
+      const maskedSettings = (data as Setting[]).map((setting: Setting) => ({
         ...setting,
         setting_value:
           setting.setting_key.includes('api_key') && setting.setting_value

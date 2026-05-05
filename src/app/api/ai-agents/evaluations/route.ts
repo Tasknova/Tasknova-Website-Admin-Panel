@@ -1,6 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@/lib/supabase'
 
+interface EvaluationRecord {
+  id: string
+  call_id: string
+  score: number
+  issues?: string[]
+  suggestions?: string[]
+  created_at: string
+  ai_calls?: {
+    call_id: string
+    agent_id: string
+    call_type: string
+    duration: number
+    created_at: string
+    ai_agents?: { name: string }
+  }
+}
+
 export async function GET(req: NextRequest) {
   try {
     const client = createServerClient()
@@ -50,9 +67,9 @@ export async function GET(req: NextRequest) {
     }
 
     // Client-side filter by agent if needed
-    let evaluations = allEvals || []
+    let evaluations: EvaluationRecord[] = (allEvals as EvaluationRecord[]) || []
     if (agentId) {
-      evaluations = evaluations.filter((e: any) => e.ai_calls?.agent_id === agentId)
+      evaluations = evaluations.filter((e: { ai_calls?: { agent_id: string } }) => e.ai_calls?.agent_id === agentId)
     }
 
     return NextResponse.json({

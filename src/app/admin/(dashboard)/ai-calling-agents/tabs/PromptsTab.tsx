@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
-import { ChevronRight, Plus, Copy } from 'lucide-react'
+import { ChevronRight, Plus } from 'lucide-react'
 
 interface PromptVersion {
   id: string
@@ -19,7 +19,7 @@ export default function PromptsTab() {
   const [loading, setLoading] = useState(true)
   const [selectedPrompt, setSelectedPrompt] = useState<PromptVersion | null>(null)
   const [showCreate, setShowCreate] = useState(false)
-  const [agents, setAgents] = useState<any[]>([])
+  const [agents, setAgents] = useState<Array<{ agent_id: string; name: string }>>([])
 
   useEffect(() => {
     fetchAgents()
@@ -70,7 +70,6 @@ export default function PromptsTab() {
       <PromptDetail
         prompt={selectedPrompt}
         onBack={() => setSelectedPrompt(null)}
-        onRefresh={fetchPrompts}
       />
     )
   }
@@ -137,10 +136,10 @@ export default function PromptsTab() {
 
 function CreatePromptForm({
   agents,
-  onSuccess,
+  onSuccess: _onSuccess,
   onCancel,
 }: {
-  agents: any[]
+  agents: Array<{ agent_id: string; name: string }>
   onSuccess: () => void
   onCancel: () => void
 }) {
@@ -169,7 +168,7 @@ function CreatePromptForm({
 
       if (!response.ok) throw new Error('Failed to create prompt')
       toast.success('Prompt created successfully')
-      onSuccess()
+      _onSuccess()
     } catch (error) {
       console.error('Error creating prompt:', error)
       toast.error('Failed to create prompt')
@@ -267,7 +266,7 @@ function CreatePromptForm({
   )
 }
 
-function PromptDetail({ prompt, onBack, onRefresh }: { prompt: PromptVersion; onBack: () => void; onRefresh: () => void }) {
+function PromptDetail({ prompt, onBack }: { prompt: PromptVersion; onBack: () => void }) {
   return (
     <div className="space-y-6">
       <button

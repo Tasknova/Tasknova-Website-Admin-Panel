@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { createServerClient } from '@/lib/supabase'
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   try {
     const client = createServerClient()
 
@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
     // Get all evaluations
     const { data: allEvaluations } = await client
       .from('ai_evaluations')
-      .select('score, call_id')
+      .select('score, call_id, issues')
 
     // Get all agents
     const { data: allAgents } = await client
@@ -35,7 +35,6 @@ export async function GET(req: NextRequest) {
         ? evaluations.reduce((sum, e) => sum + e.score, 0) / evaluations.length
         : 0
 
-    const completedCalls = calls.filter((c) => c.status === 'completed').length
     const conversionRate = totalCalls > 0 ? (validCalls / totalCalls) * 100 : 0
 
     // Group calls by date for trend
@@ -85,7 +84,7 @@ export async function GET(req: NextRequest) {
 
     // Most common issues
     const issueFrequency: { [key: string]: number } = {}
-    evaluations.forEach((evaluation: any) => {
+    evaluations.forEach((evaluation: { score?: number; call_id?: string; issues?: string[] }) => {
       if (evaluation.issues && Array.isArray(evaluation.issues)) {
         evaluation.issues.forEach((issue: string) => {
           issueFrequency[issue] = (issueFrequency[issue] || 0) + 1

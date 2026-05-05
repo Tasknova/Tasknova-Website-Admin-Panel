@@ -29,14 +29,16 @@ export default function EvaluationsTab() {
     max_score: '',
     agent_id: '',
   })
-  const [agents, setAgents] = useState<any[]>([])
+  const [agents, setAgents] = useState<Array<{ agent_id: string; name: string }>>([])
 
   useEffect(() => {
     fetchAgents()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
     fetchEvaluations()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters])
 
   const fetchAgents = async () => {

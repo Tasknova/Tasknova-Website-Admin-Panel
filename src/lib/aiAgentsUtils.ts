@@ -1,7 +1,12 @@
 import { createServerClient } from '@/lib/supabase'
 
+export interface TranscriptMessage {
+  role: string
+  content: string
+}
+
 export interface EvaluationInput {
-  transcript_history?: any[]
+  transcript_history?: TranscriptMessage[]
   summary?: string
   outcome?: string
   duration?: number
@@ -105,7 +110,7 @@ export function classifyCall(duration: number, hasTranscript: boolean): 'valid' 
  */
 export async function logAuditEvent(
   eventType: string,
-  payload: Record<string, any>
+  payload: Record<string, unknown>
 ) {
   const client = createServerClient()
   

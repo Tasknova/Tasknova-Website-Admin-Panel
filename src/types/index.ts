@@ -149,6 +149,19 @@ export interface VoiceConversation {
   updated_at: string
 }
 
+export interface Agent {
+  agent_id: string
+  name: string
+  description?: string
+  status?: string
+  metadata?: Record<string, unknown>
+  total_calls?: number
+  valid_calls?: number
+  failed_calls?: number
+  avg_score?: number
+  created_at?: string
+}
+
 export interface ChatConversation {
   id: string
   agent_id: string

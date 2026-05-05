@@ -30,6 +30,7 @@ export default function AgentsTab() {
 
   useEffect(() => {
     initializeAgents()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const checkSyncStatus = async () => {
@@ -182,13 +183,25 @@ export default function AgentsTab() {
   )
 }
 
+interface Metrics {
+  agent_id: string
+  total_calls: number
+  valid_calls: number
+  failed_calls: number
+  invalid_calls: number
+  completed_calls: number
+  avg_score: number
+  success_rate: number
+  avg_duration: number
+}
+
 function AgentDetail({ agent, onBack }: { agent: Agent; onBack: () => void }) {
-  const [metrics, setMetrics] = useState<any>(null)
+  const [metrics, setMetrics] = useState<Metrics | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     fetchMetrics()
-  }, [agent.agent_id])
+  }, [agent.agent_id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchMetrics = async () => {
     try {

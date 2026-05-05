@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { createServerClient } from '@/lib/supabase'
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   try {
     const client = createServerClient()
 
@@ -24,16 +24,16 @@ export async function GET(req: NextRequest) {
       agents.map(async (agent) => {
         const { data: callData } = await client
           .from('ai_calls')
-          .select('status, call_type')
+          .select('call_id, status, call_type')
           .eq('agent_id', agent.agent_id)
 
-        let evalData = []
+        let evalData: Array<{ score: number }> = []
         if (callData && callData.length > 0) {
           const { data: evals } = await client
             .from('ai_evaluations')
             .select('score')
             .in('call_id', callData.map((c) => c.call_id))
-          evalData = evals || []
+          evalData = (evals as Array<{ score: number }>) || []
         }
 
         const totalCalls = callData?.length || 0

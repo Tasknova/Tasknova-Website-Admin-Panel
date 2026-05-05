@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { createServerClient } from '@/lib/supabase'
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   try {
     const client = createServerClient()
 
@@ -16,8 +16,8 @@ export async function GET(req: NextRequest) {
     if (lastSyncData?.setting_value) {
       try {
         lastSyncTime = new Date(lastSyncData.setting_value)
-      } catch (e) {
-        console.log('Invalid last_sync timestamp:', lastSyncData.setting_value)
+      } catch (error) {
+        console.log('Invalid last_sync timestamp:', lastSyncData.setting_value, error)
       }
     }
 

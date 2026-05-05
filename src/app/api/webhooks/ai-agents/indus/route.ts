@@ -7,10 +7,39 @@ import {
   getMinCallDuration,
 } from '@/lib/aiAgentsUtils'
 
+interface WebhookBody {
+  event: string
+  data: Record<string, unknown>
+}
+
+interface CallCompletedData {
+  call_id: string
+  duration?: number
+  recording_url?: string
+  end_time?: string
+}
+
+interface CallFailedData {
+  call_id: string
+  error?: string
+}
+
+interface TranscriptReadyData {
+  call_id: string
+  transcript?: string
+  summary?: string
+  outcome?: string
+}
+
+interface TranscriptFailedData {
+  call_id: string
+  error?: string
+}
+
 export async function POST(req: NextRequest) {
   try {
     const client = createServerClient()
-    const body = await req.json()
+    const body = (await req.json()) as WebhookBody
 
     const { event, data } = body
 
@@ -20,19 +49,19 @@ export async function POST(req: NextRequest) {
 
     switch (event) {
       case 'call.completed': {
-        return await handleCallCompleted(client, data)
+        return await handleCallCompleted(client, data as unknown as CallCompletedData)
       }
 
       case 'call.failed': {
-        return await handleCallFailed(client, data)
+        return await handleCallFailed(client, data as unknown as CallFailedData)
       }
 
       case 'transcript.ready': {
-        return await handleTranscriptReady(client, data)
+        return await handleTranscriptReady(client, data as unknown as TranscriptReadyData)
       }
 
       case 'transcript.failed': {
-        return await handleTranscriptFailed(client, data)
+        return await handleTranscriptFailed(client, data as unknown as TranscriptFailedData)
       }
 
       default:
@@ -48,7 +77,10 @@ export async function POST(req: NextRequest) {
   }
 }
 
-async function handleCallCompleted(client: any, data: any) {
+async function handleCallCompleted(
+  client: ReturnType<typeof createServerClient>,
+  data: CallCompletedData
+) {
   const { call_id, duration, recording_url, end_time } = data
 
   // Ensure idempotency - check if already processed
@@ -86,7 +118,10 @@ async function handleCallCompleted(client: any, data: any) {
   return NextResponse.json({ received: true, event: 'call.completed' })
 }
 
-async function handleCallFailed(client: any, data: any) {
+async function handleCallFailed(
+  client: ReturnType<typeof createServerClient>,
+  data: CallFailedData
+) {
   const { call_id } = data
 
   const { data: existingCall } = await client
@@ -111,7 +146,10 @@ async function handleCallFailed(client: any, data: any) {
   return NextResponse.json({ received: true, event: 'call.failed' })
 }
 
-async function handleTranscriptReady(client: any, data: any) {
+async function handleTranscriptReady(
+  client: ReturnType<typeof createServerClient>,
+  data: TranscriptReadyData
+) {
   const { call_id, transcript, summary, outcome } = data
   const minCallDuration = await getMinCallDuration()
 
@@ -222,7 +260,10 @@ async function handleTranscriptReady(client: any, data: any) {
   return NextResponse.json({ received: true, event: 'transcript.ready' })
 }
 
-async function handleTranscriptFailed(client: any, data: any) {
+async function handleTranscriptFailed(
+  client: ReturnType<typeof createServerClient>,
+  data: TranscriptFailedData
+) {
   const { call_id } = data
 
   const { data: callRecord } = await client

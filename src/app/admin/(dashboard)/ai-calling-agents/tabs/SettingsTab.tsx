@@ -148,7 +148,7 @@ export default function SettingsTab() {
             </button>
           </div>
           <p className="text-xs text-gray-500 mt-1">
-            This URL will receive webhook events from IndusLabs. Make sure it's publicly accessible.
+            This URL will receive webhook events from IndusLabs. Make sure it&apos;s publicly accessible.
           </p>
         </div>
       </SettingSection>
@@ -180,7 +180,7 @@ export default function SettingsTab() {
               </button>
             </div>
             <p className="text-xs text-gray-500 mt-1">
-              Calls shorter than this duration are marked as "invalid"
+              Calls shorter than this duration are marked as &ldquo;invalid&rdquo;
             </p>
           </div>
 

@@ -1,7 +1,8 @@
 'use client'
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
-import { Play, Pause, ChevronRight } from 'lucide-react'
+import { ChevronRight } from 'lucide-react'
+import { Agent } from '@/types'
 
 interface Call {
   call_id: string
@@ -27,15 +28,7 @@ export default function CallsTab() {
     status: '',
     call_type: '',
   })
-  const [agents, setAgents] = useState<any[]>([])
-
-  useEffect(() => {
-    fetchAgents()
-  }, [])
-
-  useEffect(() => {
-    fetchCalls()
-  }, [filters])
+  const [agents, setAgents] = useState<Agent[]>([])
 
   const fetchAgents = async () => {
     try {
@@ -67,6 +60,16 @@ export default function CallsTab() {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    fetchAgents()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    fetchCalls()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters])
 
   if (selectedCall) {
     return <CallDetail call={selectedCall} onBack={() => setSelectedCall(null)} />

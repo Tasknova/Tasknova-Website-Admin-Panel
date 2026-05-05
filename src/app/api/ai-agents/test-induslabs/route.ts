@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { createServerClient } from '@/lib/supabase'
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   try {
     const client = createServerClient()
 
@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
 
     const apiKey = settingsData.setting_value
 
-    const results: { [key: string]: any } = {}
+    const results: { [key: string]: unknown } = {}
 
     // Test the correct IndusLabs endpoint
     const endpoint = 'https://developer.induslabs.io/api/agents'
