@@ -206,3 +206,96 @@ export async function getActivePromptVersion(agentId: string) {
     return null
   }
 }
+
+/**
+ * Get IndusLabs access token via login
+ */
+export async function getIndusLabsAccessToken(): Promise<string | null> {
+  try {
+    const email = process.env.INDUSLABS_EMAIL
+    const password = process.env.INDUSLABS_PASSWORD
+
+    if (!email || !password) {
+      console.error('IndusLabs credentials not configured in .env', {
+        hasEmail: !!email,
+        hasPassword: !!password,
+      })
+      return null
+    }
+
+    console.log('Attempting IndusLabs login with email:', email)
+
+    const response = await fetch('https://developer.induslabs.io/api/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        email,
+        password,
+      }),
+    })
+
+    console.log('IndusLabs login response status:', response.status)
+
+    if (!response.ok) {
+      const errorBody = await response.text()
+      console.error(`IndusLabs login failed: ${response.status}`, errorBody)
+      return null
+    }
+
+    const data = (await response.json()) as {
+      access_token?: string
+      token?: string
+      data?: { access_token?: string; token?: string }
+    }
+    
+    // Handle nested response structure from IndusLabs
+    const token =
+      data.access_token ||
+      data.token ||
+      data.data?.access_token ||
+      data.data?.token ||
+      null
+    
+    console.log('IndusLabs login successful, token received:', !!token)
+    return token
+  } catch (error) {
+    console.error('Failed to get IndusLabs access token:', error)
+    return null
+  }
+}
+
+/**
+ * Get agent details from IndusLabs API
+ */
+export async function getIndusLabsAgentDetails(agentId: string): Promise<Record<string, unknown> | null> {
+  try {
+    const accessToken = await getIndusLabsAccessToken()
+
+    if (!accessToken) {
+      console.error('Failed to obtain access token')
+      return null
+    }
+
+    const response = await fetch(
+      `https://developer.induslabs.io/api/agents/${agentId}`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
+    )
+
+    if (!response.ok) {
+      console.error(`Failed to fetch agent details: ${response.status}`)
+      return null
+    }
+
+    return (await response.json()) as Record<string, unknown>
+  } catch (error) {
+    console.error('Failed to get agent details:', error)
+    return null
+  }
+}
