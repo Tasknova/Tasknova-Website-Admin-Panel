@@ -123,6 +123,7 @@ export default function CallsTab() {
       setInitiatingCall(true)
       
       // Build request body
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const requestBody: any = {
         customer_number: customerNumber.trim(),
         agent_id: selectedAgent,

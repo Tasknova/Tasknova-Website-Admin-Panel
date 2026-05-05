@@ -90,6 +90,7 @@ export async function POST(req: NextRequest) {
     })
 
     // Call IndusLabs Click2Call API
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const clickToCallPayload: any = {
       customer_number: normalizedCustomerNumber,
       agent_number,
@@ -138,6 +139,7 @@ export async function POST(req: NextRequest) {
     const responseBody = await response.text()
     console.log('IndusLabs response body:', responseBody)
     
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let callData: any
     try {
       callData = JSON.parse(responseBody) as {
@@ -192,7 +194,7 @@ export async function POST(req: NextRequest) {
     })
 
     // Return immediately with call_id and status
-    const response = NextResponse.json({
+    const jsonResponse = NextResponse.json({
       success: true,
       call_id,
       call_status: normalizedCallStatus,
@@ -206,7 +208,7 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    return response
+    return jsonResponse
   } catch (error) {
     console.error('Error initiating call:', error)
     return NextResponse.json(
@@ -220,6 +222,7 @@ export async function POST(req: NextRequest) {
 async function pollTranscriptInBackground(
   call_id: string,
   accessToken: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   client: any
 ) {
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -255,6 +258,7 @@ async function pollTranscriptInBackground(
             transcript?: {
               summary?: string | null
               call_outcome?: string | null
+              transcript_id?: string | null
               history?: unknown[]
             } | null
             error?: string | null
@@ -331,3 +335,4 @@ async function pollTranscriptInBackground(
     call_id,
     max_attempts: maxAttempts,
   })
+}
