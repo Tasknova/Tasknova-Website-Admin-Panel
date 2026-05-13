@@ -1,5 +1,9 @@
 import { createServerClient } from '@/lib/supabase'
 
+// Token cache with TTL
+let cachedToken: string | null = null
+let tokenExpiresAt: number = 0
+
 export interface TranscriptMessage {
   role: string
   content: string
@@ -208,10 +212,19 @@ export async function getActivePromptVersion(agentId: string) {
 }
 
 /**
- * Get IndusLabs access token via login
+ * Get IndusLabs access token via login with email/password
+ * The access token is a JWT from the login endpoint, NOT the API key
+ * @param forceRefresh - If true, get a fresh token instead of using cache
  */
-export async function getIndusLabsAccessToken(): Promise<string | null> {
+export async function getIndusLabsAccessToken(forceRefresh: boolean = false): Promise<string | null> {
   try {
+    // Check if we have a cached token that's still valid (unless forceRefresh)
+    if (!forceRefresh && cachedToken && tokenExpiresAt > Date.now() + 30000) { // Keep 30s buffer
+      const remainingMs = tokenExpiresAt - Date.now()
+      console.log('Using cached IndusLabs token (expires in', Math.round(remainingMs / 1000), 'seconds)')
+      return cachedToken
+    }
+
     const email = process.env.INDUSLABS_EMAIL
     const password = process.env.INDUSLABS_PASSWORD
 
@@ -248,6 +261,7 @@ export async function getIndusLabsAccessToken(): Promise<string | null> {
       access_token?: string
       token?: string
       data?: { access_token?: string; token?: string }
+      expires_in?: number
     }
     
     // Handle nested response structure from IndusLabs
@@ -259,6 +273,20 @@ export async function getIndusLabsAccessToken(): Promise<string | null> {
       null
     
     console.log('IndusLabs login successful, token received:', !!token)
+    
+    if (!token) {
+      console.error('No token in IndusLabs response:', data)
+      return null
+    }
+    
+    // Cache token with TTL using actual expires_in from response, or shorter default (5 min instead of 1 hour)
+    // IndusLabs tokens appear to have short TTL, so we default to 5 minutes with safety buffer
+    const expiresInSeconds = data.expires_in || 300 // 5 minutes default
+    const ttlMs = Math.min(expiresInSeconds * 1000, 5 * 60 * 1000) // Cap at 5 minutes
+    cachedToken = token
+    tokenExpiresAt = Date.now() + ttlMs
+    console.log(`Token cached for ${ttlMs / 1000} seconds (expires_in from response: ${expiresInSeconds}s)`)
+    
     return token
   } catch (error) {
     console.error('Failed to get IndusLabs access token:', error)
@@ -296,6 +324,52 @@ export async function getIndusLabsAgentDetails(agentId: string): Promise<Record<
     return (await response.json()) as Record<string, unknown>
   } catch (error) {
     console.error('Failed to get agent details:', error)
+    return null
+  }
+}
+
+/**
+ * Get agent versions/configs from IndusLabs API
+ */
+export async function getIndusLabsAgentVersions(agentId: string): Promise<Record<string, unknown>[] | null> {
+  try {
+    const accessToken = await getIndusLabsAccessToken()
+
+    if (!accessToken) {
+      console.error('Failed to obtain access token')
+      return null
+    }
+
+    const response = await fetch(
+      `https://developer.induslabs.io/api/agents/${agentId}/configs`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
+    )
+
+    if (!response.ok) {
+      console.error(`Failed to fetch agent versions: ${response.status}`)
+      return null
+    }
+
+    const data = await response.json()
+    // Return array of versions/configs
+    if (Array.isArray(data)) {
+      return data
+    }
+    if (data.configs && Array.isArray(data.configs)) {
+      return data.configs
+    }
+    if (data.data && Array.isArray(data.data)) {
+      return data.data
+    }
+    
+    return [data]
+  } catch (error) {
+    console.error('Failed to get agent versions:', error)
     return null
   }
 }

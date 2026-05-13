@@ -51,7 +51,8 @@ export default function DashboardTab() {
     try {
       setLoading(true)
       const response = await fetch('/api/ai-agents/dashboard', {
-        cache: 'no-store',
+        // Allow use of cached responses when available
+        cache: 'force-cache',
       })
       if (!response.ok) throw new Error('Failed to fetch dashboard data')
       const result = await response.json()
@@ -258,7 +259,7 @@ export default function DashboardTab() {
               <h4 className="font-medium text-gray-700 text-sm mb-2">Best Performing Agent:</h4>
               <p className="text-sm text-green-600 font-medium">{insights.best_performing_agent.name}</p>
               <p className="text-sm text-gray-600">
-                Avg Score: {insights.best_performing_agent.avg_score.toFixed(2)}
+                Avg Score: {insights.best_performing_agent.avg_score ? insights.best_performing_agent.avg_score.toFixed(2) : 'N/A'}
               </p>
             </div>
           )}
@@ -269,7 +270,7 @@ export default function DashboardTab() {
               <h4 className="font-medium text-gray-700 text-sm mb-2">Needs Attention:</h4>
               <p className="text-sm text-red-600 font-medium">{insights.worst_performing_agent.name}</p>
               <p className="text-sm text-gray-600">
-                Avg Score: {insights.worst_performing_agent.avg_score.toFixed(2)}
+                Avg Score: {insights.worst_performing_agent.avg_score ? insights.worst_performing_agent.avg_score.toFixed(2) : 'N/A'}
               </p>
             </div>
           )}
