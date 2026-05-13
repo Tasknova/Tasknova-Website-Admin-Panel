@@ -5,58 +5,44 @@ export async function GET() {
   try {
     const client = createServerClient()
 
-    // Fetch agents with call metrics
-    const { data: agents, error } = await client
-      .from('ai_agents')
-      .select('*')
-      .order('created_at', { ascending: false })
-
-    if (error) {
-      console.error('Database error:', error)
-      return NextResponse.json(
-        { error: 'Failed to fetch agents' },
-        { status: 500 }
-      )
-    }
-
-    // Enrich agents with metrics
-    const enrichedAgents = await Promise.all(
-      agents.map(async (agent) => {
-        const { data: callData } = await client
-          .from('ai_calls')
-          .select('call_id, status, call_type')
-          .eq('agent_id', agent.agent_id)
-
-        let evalData: Array<{ score: number }> = []
-        if (callData && callData.length > 0) {
-          const { data: evals } = await client
-            .from('ai_evaluations')
-            .select('score')
-            .in('call_id', callData.map((c) => c.call_id))
-          evalData = (evals as Array<{ score: number }>) || []
-        }
-
-        const totalCalls = callData?.length || 0
-        const validCalls = callData?.filter((c) => c.call_type === 'valid').length || 0
-        const failedCalls = callData?.filter((c) => c.call_type === 'failed').length || 0
-        const avgScore =
-          evalData && evalData.length > 0
-            ? evalData.reduce((sum, e) => sum + e.score, 0) / evalData.length
-            : 0
-
-        return {
-          ...agent,
-          total_calls: totalCalls,
-          valid_calls: validCalls,
-          failed_calls: failedCalls,
-          avg_score: Math.round(avgScore * 100) / 100,
-        }
-      })
+    // Optimized: Fetch agents with aggregated metrics using SQL
+    // This uses a single query with aggregation instead of N+1 queries
+    const { data: enrichedAgents, error } = await client.rpc(
+      'get_agents_with_metrics'
     )
 
-    return NextResponse.json({
-      agents: enrichedAgents,
+    if (error) {
+      console.error('RPC error:', error)
+      
+      // Fallback: Use basic query if RPC doesn't exist
+      console.log('RPC not available, using basic query...')
+      const { data: agents, error: basicError } = await client
+        .from('ai_agents')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+      if (basicError) {
+        console.error('Database error:', basicError)
+        return NextResponse.json(
+          { error: 'Failed to fetch agents' },
+          { status: 500 }
+        )
+      }
+
+      const response = NextResponse.json({
+        agents: agents || [],
+      })
+      // Cache for 30 seconds
+      response.headers.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60')
+      return response
+    }
+
+    const response = NextResponse.json({
+      agents: enrichedAgents || [],
     })
+    // Cache for 30 seconds
+    response.headers.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60')
+    return response
   } catch (error) {
     console.error('Error fetching agents:', error)
     return NextResponse.json(

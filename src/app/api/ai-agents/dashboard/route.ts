@@ -4,27 +4,38 @@ import { createServerClient } from '@/lib/supabase'
 export async function GET() {
   try {
     const client = createServerClient()
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
 
-    // Get all calls
-    const { data: allCalls, error: callsError } = await client
+    // Fetch only recent calls (last 30 days) - much faster than all calls
+    const { data: recentCalls, error: callsError } = await client
       .from('ai_calls')
-      .select('*')
+      .select('call_id, agent_id, call_type, created_at, status')
+      .gte('created_at', thirtyDaysAgo)
+      .order('created_at', { ascending: false })
 
     if (callsError) {
       console.error('Error fetching calls:', callsError)
     }
 
-    // Get all evaluations
-    const { data: allEvaluations, error: evaluationsError } = await client
-      .from('ai_evaluations')
-      .select('score, call_id, issues')
+    // Fetch evaluations only for recent calls - much faster
+    const callIds = (recentCalls || []).map((c) => c.call_id)
+    let recentEvaluations: Array<{ score: number; call_id: string; issues: string[] }> = []
+    
+    if (callIds.length > 0) {
+      const { data: evals, error: evaluationsError } = await client
+        .from('ai_evaluations')
+        .select('score, call_id, issues')
+        .in('call_id', callIds)
 
-    if (evaluationsError) {
-      console.error('Error fetching evaluations:', evaluationsError)
+      if (evaluationsError) {
+        console.error('Error fetching evaluations:', evaluationsError)
+      } else {
+        recentEvaluations = (evals as Array<{ score: number; call_id: string; issues: string[] }>) || []
+      }
     }
 
-    // Get all agents
-    const { data: allAgents, error: agentsError } = await client
+    // Fetch agents
+    const { data: agents, error: agentsError } = await client
       .from('ai_agents')
       .select('agent_id, name')
 
@@ -32,31 +43,15 @@ export async function GET() {
       console.error('Error fetching agents:', agentsError)
     }
 
-    const calls = allCalls || []
-    const evaluations = allEvaluations || []
-    const agents = allAgents || []
-
-    console.log('Dashboard Data:', {
-      totalCalls: calls.length,
-      totalEvaluations: evaluations.length,
-      totalAgents: agents.length,
-      callsData: calls,
-    })
+    const calls = recentCalls || []
+    const evaluations = recentEvaluations
+    const agentsList = agents || []
 
     // Calculate metrics
     const totalCalls = calls.length
     const validCalls = calls.filter((c) => c.call_type === 'valid').length
     const failedCalls = calls.filter((c) => c.call_type === 'failed').length
     const invalidCalls = calls.filter((c) => c.call_type === 'invalid').length
-
-    console.log('Metric Breakdown:', {
-      totalCalls,
-      validCalls,
-      failedCalls,
-      invalidCalls,
-      callTypes: calls.map((c) => c.call_type),
-      callStatuses: calls.map((c) => c.status),
-    })
 
     const avgEvaluationScore =
       evaluations.length > 0
@@ -75,7 +70,6 @@ export async function GET() {
     const callTrend = Object.entries(callsByDate)
       .map(([date, count]) => ({ date, count }))
       .sort((a, b) => a.date.localeCompare(b.date))
-      .slice(-30) // Last 30 days
 
     // Score trend
     const scoreTrend = evaluations
@@ -101,7 +95,6 @@ export async function GET() {
         avg_score: item.scores.reduce((a, b) => a + b, 0) / item.scores.length,
       }))
       .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
-      .slice(-30)
 
     // Outcome distribution
     const outcomes: { [key: string]: number } = {}
@@ -126,7 +119,7 @@ export async function GET() {
       .slice(0, 5)
 
     // Best performing agent
-    const agentPerformance = agents.map((agent) => {
+    const agentPerformance = agentsList.map((agent) => {
       const agentCalls = calls.filter((c) => c.agent_id === agent.agent_id)
       const agentEvals = evaluations.filter((e) =>
         agentCalls.some((c) => c.call_id === e.call_id)
@@ -147,7 +140,7 @@ export async function GET() {
     const bestAgent = agentPerformance.sort((a, b) => b.avg_score - a.avg_score)[0]
     const worstAgent = agentPerformance.sort((a, b) => a.avg_score - b.avg_score)[0]
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       metrics: {
         total_calls: totalCalls,
         valid_calls: validCalls,
@@ -167,6 +160,9 @@ export async function GET() {
         worst_performing_agent: worstAgent,
       },
     })
+    // Cache dashboard for 60 seconds (it's less critical than agents list)
+    response.headers.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=120')
+    return response
   } catch (error) {
     console.error('Error fetching dashboard metrics:', error)
     return NextResponse.json(

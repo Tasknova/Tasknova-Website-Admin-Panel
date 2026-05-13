@@ -53,16 +53,16 @@ export default function AgentsTab() {
     try {
       setLoading(true)
       
-      // Check if sync is needed
-      const status = await checkSyncStatus()
+      // Fetch agents first (faster path)
+      await fetchAgents()
       
-      if (status && status.needs_sync) {
-        console.log('Auto-syncing agents (1 hour interval passed)')
-        await syncFromIndusLabs(true)
-      } else {
-        // Just fetch from database
-        await fetchAgents()
-      }
+      // Check sync status in background (don't wait for it)
+      checkSyncStatus().then(status => {
+        if (status && status.needs_sync) {
+          console.log('Auto-syncing agents (1 hour interval passed)')
+          syncFromIndusLabs(true)
+        }
+      })
     } catch (error) {
       console.error('Error initializing agents:', error)
       await fetchAgents()
@@ -112,6 +112,26 @@ export default function AgentsTab() {
     }
   }
 
+  const syncAgentConfigs = async () => {
+    try {
+      setSyncing(true)
+      const response = await fetch('/api/ai-agents/sync-configs', {
+        method: 'POST',
+      })
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.error || 'Failed to sync agent configs')
+      }
+      const result = await response.json()
+      toast.success(result.message || 'Agent configs synced successfully')
+    } catch (error) {
+      console.error('Error syncing agent configs:', error)
+      toast.error(error instanceof Error ? error.message : 'Failed to sync agent configs')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   if (loading) {
     return <div className="text-center py-8">Loading agents...</div>
   }
@@ -139,14 +159,24 @@ export default function AgentsTab() {
             </p>
           )}
         </div>
-        <button 
-          onClick={() => syncFromIndusLabs(false)}
-          disabled={syncing}
-          className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-        >
-          <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
-          {syncing ? 'Syncing...' : 'Sync Agents'}
-        </button>
+        <div className="flex gap-2">
+          <button 
+            onClick={() => syncFromIndusLabs(false)}
+            disabled={syncing}
+            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
+            {syncing ? 'Syncing...' : 'Sync Agents'}
+          </button>
+          <button 
+            onClick={syncAgentConfigs}
+            disabled={syncing}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
+            Sync Configs
+          </button>
+        </div>
       </div>
 
       {agents.length === 0 ? (
@@ -154,12 +184,12 @@ export default function AgentsTab() {
           <p className="text-gray-600">No agents found. Sync from IndusLabs to get started.</p>
         </div>
       ) : (
-        <div className="grid gap-4">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {agents.map((agent) => (
             <div
               key={agent.agent_id}
               onClick={() => setSelectedAgent(agent)}
-              className="bg-white rounded-lg border border-gray-200 p-6 cursor-pointer hover:shadow-md transition"
+              className="bg-white rounded-lg border border-gray-200 p-6 cursor-pointer hover:shadow-md transition h-full"
             >
               <div className="flex items-center justify-between">
                 <div>
@@ -173,7 +203,7 @@ export default function AgentsTab() {
                 <MetricSmall label="Total Calls" value={agent.total_calls} />
                 <MetricSmall label="Valid Calls" value={agent.valid_calls} color="text-green-600" />
                 <MetricSmall label="Failed Calls" value={agent.failed_calls} color="text-red-600" />
-                <MetricSmall label="Avg Score" value={agent.avg_score.toFixed(2)} color="text-purple-600" />
+                <MetricSmall label="Avg Score" value={agent.avg_score ? agent.avg_score.toFixed(2) : 'N/A'} color="text-purple-600" />
               </div>
             </div>
           ))}
@@ -200,15 +230,40 @@ interface AgentDetails {
   remote: Record<string, unknown> | null
 }
 
+interface AgentConfig {
+  agent_id: string
+  system_prompt?: string
+  starting_instructions?: string
+  agent_type?: string
+  guardrail_ids?: string[]
+  call_infields?: Array<{
+    field_name: string
+    field_type: string
+    is_visible: boolean
+  }>
+  tts_config?: Record<string, unknown>
+  llm_config?: Record<string, unknown>
+  stt_config?: Record<string, unknown>
+  vad_config?: Record<string, unknown>
+  notes?: string
+  status?: string
+  version?: number
+  synced_at?: string
+}
+
 function AgentDetail({ agent, onBack }: { agent: Agent; onBack: () => void }) {
   const [metrics, setMetrics] = useState<Metrics | null>(null)
   const [agentDetails, setAgentDetails] = useState<AgentDetails | null>(null)
+  const [agentConfig, setAgentConfig] = useState<AgentConfig | null>(null)
   const [loading, setLoading] = useState(true)
   const [detailsLoading, setDetailsLoading] = useState(true)
+  const [configLoading, setConfigLoading] = useState(true)
+  const [showUpdateConfig, setShowUpdateConfig] = useState(false)
 
   useEffect(() => {
     fetchMetrics()
     fetchAgentDetails()
+    fetchAgentConfig()
   }, [agent.agent_id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchMetrics = async () => {
@@ -238,6 +293,60 @@ function AgentDetail({ agent, onBack }: { agent: Agent; onBack: () => void }) {
       // Don't show error toast as details are optional
     } finally {
       setDetailsLoading(false)
+    }
+  }
+
+  const fetchAgentConfig = async () => {
+    try {
+      setConfigLoading(true)
+      console.log(`Fetching config for agent: ${agent.agent_id}`)
+      const response = await fetch(`/api/ai-agents/${agent.agent_id}/config`)
+      
+      if (response.status === 404) {
+        console.warn('Agent config not found - needs to be synced')
+        setAgentConfig(null)
+        return
+      }
+      
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.error || 'Failed to fetch agent config')
+      }
+      
+      const result = await response.json()
+      console.log('Agent config fetched:', result.data)
+      setAgentConfig(result.data)
+    } catch (error) {
+      console.error('Error fetching agent config:', error)
+      setAgentConfig(null)
+    } finally {
+      setConfigLoading(false)
+    }
+  }
+
+  const syncAgentConfig = async () => {
+    try {
+      setConfigLoading(true)
+      console.log(`Syncing config for agent: ${agent.agent_id}`)
+      const response = await fetch('/api/ai-agents/sync-configs', {
+        method: 'POST',
+      })
+      
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.error || 'Failed to sync agent config')
+      }
+      
+      const result = await response.json()
+      console.log('Sync result:', result)
+      
+      // Refetch the config after syncing
+      await fetchAgentConfig()
+      toast.success('Agent config synced successfully')
+    } catch (error) {
+      console.error('Error syncing agent config:', error)
+      toast.error(error instanceof Error ? error.message : 'Failed to sync agent config')
+      setConfigLoading(false)
     }
   }
 
@@ -275,7 +384,7 @@ function AgentDetail({ agent, onBack }: { agent: Agent; onBack: () => void }) {
             <MetricCard label="Failed Calls" value={metrics.failed_calls} />
             <MetricCard label="Invalid Calls" value={metrics.invalid_calls} />
             <MetricCard label="Completed" value={metrics.completed_calls} />
-            <MetricCard label="Avg Score" value={metrics.avg_score.toFixed(2)} />
+            <MetricCard label="Avg Score" value={metrics.avg_score ? metrics.avg_score.toFixed(2) : 'N/A'} />
             <MetricCard label="Success Rate" value={`${metrics.success_rate}%`} />
             <MetricCard label="Avg Duration" value={`${metrics.avg_duration}s`} />
           </div>
@@ -387,7 +496,483 @@ function AgentDetail({ agent, onBack }: { agent: Agent; onBack: () => void }) {
           )}
         </div>
       )}
+
+      <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xl font-semibold text-gray-900">Agent Configuration</h3>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShowUpdateConfig(true)}
+              className="px-3 py-1 text-sm bg-purple-600 text-white rounded hover:bg-purple-700 transition disabled:opacity-50"
+            >
+              Update Config
+            </button>
+            <button
+              onClick={syncAgentConfig}
+              disabled={configLoading}
+              className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition disabled:opacity-50 flex items-center gap-2"
+            >
+              <RefreshCw className={`w-4 h-4 ${configLoading ? 'animate-spin' : ''}`} />
+              {configLoading ? 'Syncing...' : 'Sync Config'}
+            </button>
+          </div>
+        </div>
+
+        {showUpdateConfig ? (
+          <UpdateConfigFormInline 
+            agent={agent} 
+            currentConfig={agentConfig}
+            onSuccess={() => {
+              setShowUpdateConfig(false)
+              fetchAgentConfig()
+            }}
+            onCancel={() => setShowUpdateConfig(false)}
+          />
+        ) : configLoading ? (
+          <div className="text-center py-8">Loading configuration...</div>
+        ) : agentConfig ? (
+          <div className="space-y-6">
+            {/* Agent Type and Status */}
+            <div className="grid grid-cols-3 gap-4">
+              <DetailItem
+                label="Agent Type"
+                value={agentConfig.agent_type || 'N/A'}
+              />
+              <DetailItem
+                label="Status"
+                value={agentConfig.status || 'N/A'}
+                valueColor={agentConfig.status === 'published' ? 'text-green-600' : 'text-yellow-600'}
+              />
+              <DetailItem
+                label="Version"
+                value={String(agentConfig.version || '1')}
+              />
+            </div>
+
+            {/* Starting Instructions */}
+            {agentConfig.starting_instructions && (
+              <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                <p className="text-sm font-medium text-blue-900 mb-2">Starting Instructions</p>
+                <p className="text-sm text-blue-800 whitespace-pre-wrap">{agentConfig.starting_instructions}</p>
+              </div>
+            )}
+
+            {/* System Prompt */}
+            {agentConfig.system_prompt && (
+              <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
+                <p className="text-sm font-medium text-purple-900 mb-2">System Prompt</p>
+                <div className="text-sm text-purple-800 whitespace-pre-wrap max-h-48 overflow-y-auto font-mono text-xs">
+                  {agentConfig.system_prompt}
+                </div>
+              </div>
+            )}
+
+            {/* Call Input Fields */}
+            {agentConfig.call_infields && agentConfig.call_infields.length > 0 && (
+              <div className="border-t pt-4">
+                <h4 className="font-semibold text-gray-900 mb-3">Call Input Fields</h4>
+                <div className="space-y-2">
+                  {agentConfig.call_infields.map((field, idx) => (
+                    <div key={idx} className="flex items-center justify-between bg-gray-50 p-3 rounded">
+                      <div>
+                        <p className="font-medium text-gray-900">{field.field_name}</p>
+                        <p className="text-xs text-gray-600">{field.field_type}</p>
+                      </div>
+                      <span className={`px-3 py-1 text-xs rounded-full ${
+                        field.is_visible 
+                          ? 'bg-green-100 text-green-800' 
+                          : 'bg-gray-100 text-gray-800'
+                      }`}>
+                        {field.is_visible ? 'Visible' : 'Hidden'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Guardrails */}
+            {agentConfig.guardrail_ids && agentConfig.guardrail_ids.length > 0 && (
+              <div className="border-t pt-4">
+                <h4 className="font-semibold text-gray-900 mb-3">Guardrails</h4>
+                <div className="flex flex-wrap gap-2">
+                  {agentConfig.guardrail_ids.map((guardrail, idx) => (
+                    <span key={idx} className="px-3 py-1 bg-red-100 text-red-800 text-xs rounded-full">
+                      {guardrail}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* TTS Configuration */}
+            {agentConfig.tts_config && (
+              <div className="border-t pt-4 bg-orange-50 rounded-lg p-4">
+                <h4 className="font-semibold text-gray-900 mb-3">Text-to-Speech Configuration</h4>
+                <div className="grid grid-cols-2 gap-3">
+                  {Object.entries(agentConfig.tts_config).map(([key, value]) => (
+                    <DetailItem
+                      key={key}
+                      label={key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+                      value={String(value)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* STT Configuration */}
+            {agentConfig.stt_config && (
+              <div className="border-t pt-4 bg-green-50 rounded-lg p-4">
+                <h4 className="font-semibold text-gray-900 mb-3">Speech-to-Text Configuration</h4>
+                <div className="grid grid-cols-2 gap-3">
+                  {Object.entries(agentConfig.stt_config).map(([key, value]) => (
+                    <DetailItem
+                      key={key}
+                      label={key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+                      value={String(value)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* LLM Configuration */}
+            {agentConfig.llm_config && (
+              <div className="border-t pt-4 bg-cyan-50 rounded-lg p-4">
+                <h4 className="font-semibold text-gray-900 mb-3">Language Model Configuration</h4>
+                <div className="grid grid-cols-2 gap-3">
+                  {Object.entries(agentConfig.llm_config).map(([key, value]) => (
+                    <DetailItem
+                      key={key}
+                      label={key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+                      value={String(value)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* VAD Configuration */}
+            {agentConfig.vad_config && (
+              <div className="border-t pt-4 bg-yellow-50 rounded-lg p-4">
+                <h4 className="font-semibold text-gray-900 mb-3">Voice Activity Detection Configuration</h4>
+                <div className="grid grid-cols-3 gap-3">
+                  {Object.entries(agentConfig.vad_config).map(([key, value]) => (
+                    <DetailItem
+                      key={key}
+                      label={key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+                      value={String(value)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Notes */}
+            {agentConfig.notes && (
+              <div className="border-t pt-4 bg-gray-50 rounded-lg p-4">
+                <p className="text-sm font-medium text-gray-700 mb-2">Notes</p>
+                <p className="text-sm text-gray-600">{agentConfig.notes}</p>
+              </div>
+            )}
+
+            {/* Last Synced */}
+            {agentConfig.synced_at && (
+              <div className="border-t pt-4">
+                <p className="text-xs text-gray-500">
+                  Last synced: {new Date(agentConfig.synced_at).toLocaleString()}
+                </p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="text-center py-8 text-gray-500">
+            <p>No agent configuration data found</p>
+            <p className="text-sm mt-2">Click &quot;Sync Config&quot; to fetch configuration from IndusLabs</p>
+          </div>
+        )}
+      </div>
     </div>
+  )
+}
+
+function UpdateConfigFormInline({
+  agent,
+  currentConfig,
+  onSuccess,
+  onCancel,
+}: {
+  agent: Agent
+  currentConfig: AgentConfig | null
+  onSuccess: () => void
+  onCancel: () => void
+}) {
+  const [formData, setFormData] = useState({
+    system_prompt: currentConfig?.system_prompt || '',
+    starting_instructions: currentConfig?.starting_instructions || '',
+    voice_id: currentConfig?.tts_config?.voice_id || 'Indus-hi-maya',
+    stt_language: currentConfig?.stt_config?.language || 'en',
+    temperature: currentConfig?.llm_config?.temperature || 0.3,
+    max_tokens: currentConfig?.llm_config?.max_tokens || 512,
+    context_turns: currentConfig?.llm_config?.context_turns || 10,
+    min_silence_duration: currentConfig?.vad_config?.min_silence_duration || 0.3,
+    min_speech_duration: currentConfig?.vad_config?.min_speech_duration || 0.4,
+    activation_threshold: currentConfig?.vad_config?.activation_threshold || 0.45,
+  })
+  const [inputVariables, setInputVariables] = useState<Array<{name: string; type: string; required: boolean}>>(
+    currentConfig?.call_infields?.map((f: any) => ({
+      name: f.field_name || '',
+      type: f.field_type || 'TEXT',
+      required: f.is_visible !== false,
+    })) || []
+  )
+  const [newVar, setNewVar] = useState({name: '', type: 'TEXT'})
+  const [submitting, setSubmitting] = useState(false)
+
+  const addInputVariable = () => {
+    if (newVar.name.trim()) {
+      setInputVariables([...inputVariables, {name: newVar.name, type: newVar.type, required: true}])
+      setNewVar({name: '', type: 'TEXT'})
+    }
+  }
+
+  const removeInputVariable = (index: number) => {
+    setInputVariables(inputVariables.filter((_, i) => i !== index))
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!formData.system_prompt) {
+      toast.error('System prompt is required')
+      return
+    }
+
+    try {
+      setSubmitting(true)
+      const response = await fetch(`/api/ai-agents/update-agent-config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent_id: agent.agent_id,
+          ...formData,
+          call_infields: inputVariables.map(v => ({
+            field_name: v.name,
+            field_type: v.type,
+            is_visible: v.required,
+          })),
+        }),
+      })
+
+      const responseData = await response.json()
+
+      if (!response.ok) {
+        const errorMsg = responseData.error || 'Failed to update config'
+        throw new Error(errorMsg)
+      }
+
+      // Validate that database save was successful
+      if (!responseData.config_saved) {
+        throw new Error('Configuration was not saved to database')
+      }
+
+      toast.success('Agent config updated successfully. New version created.')
+      onSuccess()
+    } catch (error) {
+      console.error('Error updating config:', error)
+      toast.error(error instanceof Error ? error.message : 'Failed to update config')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-6 bg-gray-50 p-6 rounded-lg border border-gray-200">
+      <div>
+        <label className="block text-sm font-medium text-gray-900 mb-2">System Prompt *</label>
+        <textarea
+          value={formData.system_prompt}
+          onChange={(e) => setFormData({...formData, system_prompt: e.target.value})}
+          rows={6}
+          className="w-full p-3 border border-gray-300 rounded-lg font-mono text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+          required
+        />
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-900 mb-2">Starting Instructions</label>
+        <textarea
+          value={formData.starting_instructions}
+          onChange={(e) => setFormData({...formData, starting_instructions: e.target.value})}
+          rows={3}
+          className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+        />
+      </div>
+
+      {/* Input Variables Section */}
+      <div className="border-t pt-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Input Variables</h3>
+        
+        {/* Add New Variable */}
+        <div className="bg-white p-4 rounded-lg border border-gray-200 mb-4">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="Variable name (e.g., customer_name)"
+              value={newVar.name}
+              onChange={(e) => setNewVar({...newVar, name: e.target.value})}
+              className="flex-1 p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addInputVariable())}
+            />
+            <select
+              value={newVar.type}
+              onChange={(e) => setNewVar({...newVar, type: e.target.value})}
+              className="p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+            >
+              <option value="TEXT">TEXT</option>
+              <option value="NUMBER">NUMBER</option>
+              <option value="EMAIL">EMAIL</option>
+              <option value="PHONE">PHONE</option>
+              <option value="DATE">DATE</option>
+            </select>
+            <button
+              type="button"
+              onClick={addInputVariable}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium"
+            >
+              + Add
+            </button>
+          </div>
+        </div>
+
+        {/* Variables List */}
+        {inputVariables.length > 0 ? (
+          <div className="space-y-2">
+            {inputVariables.map((variable, index) => (
+              <div key={index} className="flex items-center justify-between bg-white p-3 rounded-lg border border-gray-200">
+                <div className="flex-1">
+                  <p className="font-medium text-gray-900">{variable.name}</p>
+                  <p className="text-xs text-gray-600">{variable.type}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeInputVariable(index)}
+                  className="px-3 py-1 text-sm text-red-600 hover:bg-red-50 rounded-lg transition"
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-600 text-center py-4">No input variables added yet</p>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-900 mb-2">Voice ID</label>
+          <input
+            type="text"
+            value={formData.voice_id}
+            onChange={(e) => setFormData({...formData, voice_id: e.target.value})}
+            className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-900 mb-2">STT Language</label>
+          <input
+            type="text"
+            value={formData.stt_language}
+            onChange={(e) => setFormData({...formData, stt_language: e.target.value})}
+            className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-900 mb-2">Temperature</label>
+          <input
+            type="number"
+            step="0.1"
+            min="0"
+            max="1"
+            value={formData.temperature}
+            onChange={(e) => setFormData({...formData, temperature: parseFloat(e.target.value)})}
+            className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-900 mb-2">Max Tokens</label>
+          <input
+            type="number"
+            value={formData.max_tokens}
+            onChange={(e) => setFormData({...formData, max_tokens: parseInt(e.target.value)})}
+            className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-900 mb-2">Context Turns</label>
+          <input
+            type="number"
+            value={formData.context_turns}
+            onChange={(e) => setFormData({...formData, context_turns: parseInt(e.target.value)})}
+            className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-900 mb-2">Min Silence Duration</label>
+          <input
+            type="number"
+            step="0.1"
+            value={formData.min_silence_duration}
+            onChange={(e) => setFormData({...formData, min_silence_duration: parseFloat(e.target.value)})}
+            className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-900 mb-2">Min Speech Duration</label>
+          <input
+            type="number"
+            step="0.1"
+            value={formData.min_speech_duration}
+            onChange={(e) => setFormData({...formData, min_speech_duration: parseFloat(e.target.value)})}
+            className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-900 mb-2">Activation Threshold</label>
+          <input
+            type="number"
+            step="0.01"
+            value={formData.activation_threshold}
+            onChange={(e) => setFormData({...formData, activation_threshold: parseFloat(e.target.value)})}
+            className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+          />
+        </div>
+      </div>
+
+      <div className="flex gap-3 pt-4 border-t">
+        <button
+          type="submit"
+          disabled={submitting}
+          className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 transition font-medium"
+        >
+          {submitting ? 'Updating...' : 'Update Config'}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
   )
 }
 
