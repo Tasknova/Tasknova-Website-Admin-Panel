@@ -708,20 +708,31 @@ function UpdateConfigFormInline({
   onSuccess: () => void
   onCancel: () => void
 }) {
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<{
+    system_prompt: string
+    starting_instructions: string
+    voice_id: string
+    stt_language: string
+    temperature: number
+    max_tokens: number
+    context_turns: number
+    min_silence_duration: number
+    min_speech_duration: number
+    activation_threshold: number
+  }>({
     system_prompt: currentConfig?.system_prompt || '',
     starting_instructions: currentConfig?.starting_instructions || '',
-    voice_id: currentConfig?.tts_config?.voice_id || 'Indus-hi-maya',
-    stt_language: currentConfig?.stt_config?.language || 'en',
-    temperature: currentConfig?.llm_config?.temperature || 0.3,
-    max_tokens: currentConfig?.llm_config?.max_tokens || 512,
-    context_turns: currentConfig?.llm_config?.context_turns || 10,
-    min_silence_duration: currentConfig?.vad_config?.min_silence_duration || 0.3,
-    min_speech_duration: currentConfig?.vad_config?.min_speech_duration || 0.4,
-    activation_threshold: currentConfig?.vad_config?.activation_threshold || 0.45,
+    voice_id: (currentConfig?.tts_config as Record<string, unknown> | undefined)?.voice_id as string || 'Indus-hi-maya',
+    stt_language: (currentConfig?.stt_config as Record<string, unknown> | undefined)?.language as string || 'en',
+    temperature: (currentConfig?.llm_config as Record<string, unknown> | undefined)?.temperature as number || 0.3,
+    max_tokens: (currentConfig?.llm_config as Record<string, unknown> | undefined)?.max_tokens as number || 512,
+    context_turns: (currentConfig?.llm_config as Record<string, unknown> | undefined)?.context_turns as number || 10,
+    min_silence_duration: (currentConfig?.vad_config as Record<string, unknown> | undefined)?.min_silence_duration as number || 0.3,
+    min_speech_duration: (currentConfig?.vad_config as Record<string, unknown> | undefined)?.min_speech_duration as number || 0.4,
+    activation_threshold: (currentConfig?.vad_config as Record<string, unknown> | undefined)?.activation_threshold as number || 0.45,
   })
   const [inputVariables, setInputVariables] = useState<Array<{name: string; type: string; required: boolean}>>(
-    currentConfig?.call_infields?.map((f: any) => ({
+    currentConfig?.call_infields?.map((f: {field_name?: string; field_type?: string; is_visible?: boolean}) => ({
       name: f.field_name || '',
       type: f.field_type || 'TEXT',
       required: f.is_visible !== false,

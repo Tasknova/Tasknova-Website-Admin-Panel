@@ -16,7 +16,7 @@ export async function GET() {
     }
 
     // 2. Try to get fresh token
-    let tokenResponse: Record<string, unknown> = { error: 'Not attempted' }
+    const tokenResponse: Record<string, unknown> = { error: 'Not attempted' }
     let token: string | null = null
 
     if (email && password) {
@@ -54,7 +54,7 @@ export async function GET() {
     }
 
     // 3. If token obtained, test it with one agent
-    let singleAgentTest: Record<string, unknown> = { skipped: 'No token' }
+    const singleAgentTest: Record<string, unknown> = { skipped: 'No token' }
 
     if (token) {
       try {
@@ -73,7 +73,7 @@ export async function GET() {
           const versions = Array.isArray(data) ? data : []
           singleAgentTest.success = true
           singleAgentTest.versions_returned = versions.length
-          singleAgentTest.sample_versions = versions.slice(0, 3).map((v: Record<string, unknown>) => ({
+          singleAgentTest.sample_versions = (versions as Array<Record<string, unknown>>).slice(0, 3).map((v) => ({
             version: v.version,
             status: v.status,
             is_current: v.is_current,
@@ -111,7 +111,7 @@ export async function GET() {
       next_steps:
         singleAgentTest.success === false
           ? 'Token test failed - Check credentials and IndusLabs account access'
-          : singleAgentTest.versions_returned > 0
+          : (singleAgentTest.versions_returned as number) > 0
             ? 'Token works! Ready to fetch all agent versions'
             : 'Token obtained but no versions returned - Agent may not have configs',
     })

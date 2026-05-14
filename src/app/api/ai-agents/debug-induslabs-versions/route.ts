@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
     let configsData: unknown = null
     try {
       configsData = await configsResponse.json()
-    } catch (e) {
+    } catch {
       configsData = await configsResponse.text()
     }
 
@@ -55,7 +55,7 @@ export async function GET(req: NextRequest) {
     let detailsData: unknown = null
     try {
       detailsData = await detailsResponse.json()
-    } catch (e) {
+    } catch {
       detailsData = await detailsResponse.text()
     }
 

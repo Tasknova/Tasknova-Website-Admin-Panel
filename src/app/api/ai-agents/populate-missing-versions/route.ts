@@ -57,7 +57,7 @@ Status: Draft (predecessor to version 3)`,
 
     for (const versionData of versionsToAdd) {
       if (!existingVersionNums.has(versionData.version)) {
-        const { data, error } = await client.from('prompt_versions').insert({
+        const { error } = await client.from('prompt_versions').insert({
           agent_id: agentId,
           version: versionData.version,
           prompt_text: versionData.prompt_text,

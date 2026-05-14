@@ -6,9 +6,9 @@ import { logAPICall } from '@/lib/apiLogger'
 const INDUSLABS_API_URL = 'https://developer.induslabs.io/api'
 
 export async function POST(request: Request) {
-  let body: any = {}
+  let body: Record<string, unknown> = {}
   try {
-    body = await request.json()
+    body = await request.json() as Record<string, unknown>
 
     // Get access token from IndusLabs login
     const accessToken = await getIndusLabsAccessToken()
@@ -256,7 +256,7 @@ export async function POST(request: Request) {
     await logAPICall({
       endpoint: '/api/ai-agents/create-agent',
       method: 'POST',
-      agent_id: body?.agent_id,
+      agent_id: body?.agent_id as string | undefined,
       request_body: body,
       status_code: 500,
       response_body: { error: errorMessage },

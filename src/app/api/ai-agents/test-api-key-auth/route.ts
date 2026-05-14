@@ -12,7 +12,7 @@ export async function GET() {
     console.log('API Key first 20 chars:', apiKey.substring(0, 20))
 
     // Try different auth methods
-    const testMethods = [
+    const testMethods: Array<{ name: string; headers: Record<string, string> }> = [
       {
         name: 'Bearer Token (API Key)',
         headers: { Authorization: `Bearer ${apiKey}` },

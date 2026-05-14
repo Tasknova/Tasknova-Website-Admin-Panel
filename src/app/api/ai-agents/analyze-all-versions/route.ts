@@ -57,8 +57,8 @@ export async function GET() {
           }
 
           // Find current version (is_current = true)
-          const currVer = versions.find(
-            (v: Record<string, unknown>) => v.is_current === true || v.status === 'published'
+          const currVer = (versions as Array<Record<string, unknown>>).find(
+            (v) => v.is_current === true || v.status === 'published'
           )
           currentVersion = currVer as Record<string, unknown> | null
         }
@@ -67,7 +67,7 @@ export async function GET() {
           agent_id: agent.agent_id,
           agent_name: agent.name,
           total_versions: versions.length,
-          versions: versions.map((v: Record<string, unknown>, idx: number) => ({
+          versions: (versions as Array<Record<string, unknown>>).map((v, idx) => ({
             version_number: v.version || `v${idx + 1}`,
             status: v.status || 'unknown',
             is_current: v.is_current || false,

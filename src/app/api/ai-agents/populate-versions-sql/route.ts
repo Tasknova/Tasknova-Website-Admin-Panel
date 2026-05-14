@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
 export async function GET() {
   try {
@@ -27,7 +27,7 @@ export async function GET() {
       RETURNING *;
     `
 
-    const { data, error } = await client.rpc('exec_sql', { sql: insertSql })
+    const { error } = await client.rpc('exec_sql', { sql: insertSql })
 
     if (error) {
       console.error('SQL Error:', error)
@@ -58,19 +58,18 @@ export async function GET() {
   }
 }
 
-async function insertVersionsViaRest(client: any, agentId: string) {
+async function insertVersionsViaRest(client: SupabaseClient, agentId: string) {
   const versionsToAdd = ['4', '3', '2']
   const results = []
 
   for (const version of versionsToAdd) {
-    const { data, error } = await client.from('prompt_versions').insert(
+    const { error } = await client.from('prompt_versions').insert(
       {
         agent_id: agentId,
         version: version,
         prompt_text: `Process Engineer Role Screening Prompt - Version ${version} (Archived)`,
         is_active: false,
-      },
-      { returning: 'minimal' }
+      }
     )
 
     if (error) {

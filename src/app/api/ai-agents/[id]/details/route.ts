@@ -70,7 +70,7 @@ export async function GET(
     console.error('Error fetching agent details:', error)
 
     // Log failed API call
-    const { id } = params as any
+    const id = (params as { id: string }).id
     await logAPICall({
       endpoint: `/api/ai-agents/${id}/details`,
       method: 'GET',

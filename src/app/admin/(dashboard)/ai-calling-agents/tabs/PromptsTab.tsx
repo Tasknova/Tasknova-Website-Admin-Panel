@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
-import { ChevronRight, Plus, CheckCircle } from 'lucide-react'
+import { Plus, CheckCircle } from 'lucide-react'
 
 interface Agent {
   agent_id: string
@@ -15,6 +15,7 @@ interface PromptVersion {
   version?: string | number
   prompt_text?: string
   is_active?: boolean
+  status?: string
   performance_score?: number
   call_count?: number
   created_at?: string
@@ -226,7 +227,7 @@ export default function PromptsTab() {
                                     ? 'bg-green-100 text-green-800'
                                     : 'bg-gray-100 text-gray-800'
                                 }`}>
-                                  {version.status}
+                                  {String(version.status)}
                                 </span>
                               )}
                             </div>

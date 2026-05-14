@@ -6,9 +6,9 @@ import { logAPICall } from '@/lib/apiLogger'
 const INDUSLABS_API_URL = 'https://developer.induslabs.io/api'
 
 export async function POST(request: Request) {
-  let body: any = {}
+  let body: Record<string, unknown> = {}
   try {
-    body = await request.json()
+    body = await request.json() as Record<string, unknown>
     const { 
       agent_id, 
       system_prompt, 
@@ -21,8 +21,7 @@ export async function POST(request: Request) {
       min_silence_duration,
       min_speech_duration,
       activation_threshold,
-      call_infields,
-      ...otherConfig 
+      call_infields
     } = body
 
     if (!agent_id || !system_prompt) {
@@ -145,7 +144,7 @@ export async function POST(request: Request) {
       .single()
 
     // Transform call_infields for storage
-    const call_infields_array = call_infields ? call_infields.map((field: any) => 
+    const call_infields_array = call_infields ? (call_infields as Array<{field_name?: string; field_type?: string; is_visible?: boolean; name?: string; type?: string}>).map((field) => 
       JSON.stringify({
         field_name: field.field_name || field.name || '',
         field_type: field.field_type || field.type || 'TEXT',
@@ -221,7 +220,7 @@ export async function POST(request: Request) {
       await logAPICall({
         endpoint: '/api/ai-agents/update-agent-config',
         method: 'POST',
-        agent_id,
+        agent_id: agent_id as string,
         request_body: body,
         status_code: 500,
         response_body: { error: errorMsg },
@@ -277,7 +276,7 @@ export async function POST(request: Request) {
     await logAPICall({
       endpoint: '/api/ai-agents/update-agent-config',
       method: 'POST',
-      agent_id,
+      agent_id: agent_id as string,
       request_body: body,
       status_code: 200,
       response_body: successResponse,
@@ -294,7 +293,7 @@ export async function POST(request: Request) {
     await logAPICall({
       endpoint: '/api/ai-agents/update-agent-config',
       method: 'POST',
-      agent_id: body?.agent_id,
+      agent_id: body?.agent_id as string | undefined,
       request_body: body,
       status_code: 500,
       response_body: { error: errorMessage },
