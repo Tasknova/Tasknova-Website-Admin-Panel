@@ -13,13 +13,13 @@ CREATE TABLE IF NOT EXISTS public.admins (
 -- Create index on email for faster lookups
 CREATE INDEX idx_admins_email ON public.admins(email);
 
--- Insert a default super admin (password: Admin@123)
--- Password hash for 'Admin@123' using bcrypt
+-- Insert a default super admin (password: Tasknova@32)
+-- Password hash for 'Tasknova@32' using bcrypt
 INSERT INTO public.admins (full_name, email, password_hash, role)
 VALUES (
     'Super Admin',
     'admin@tasknova.com',
-    '$2a$10$WXKKlhmsKWoZLtDMgLUNC.UaAQfhhc1fQKDawIPFDdEobEm7S/fsK',
+    '$2a$10$LuHE7TKGyuNSyDd599KAWOklqIxSMfSj5hg53GtN0D.1MGpxCuG2O',
     'super_admin'
 );
 
