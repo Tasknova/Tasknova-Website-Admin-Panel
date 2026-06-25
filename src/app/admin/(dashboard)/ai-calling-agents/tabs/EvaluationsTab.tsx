@@ -34,7 +34,6 @@ interface Evaluation {
 export default function EvaluationsTab({ isActive = true }: { isActive?: boolean }) {
   const [evaluations, setEvaluations] = useState<Evaluation[]>([])
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
   const [filters, setFilters] = useState({
     min_score: '',
     max_score: '',
@@ -60,8 +59,6 @@ export default function EvaluationsTab({ isActive = true }: { isActive?: boolean
     try {
       if (showLoading) {
         setLoading(true)
-      } else {
-        setRefreshing(true)
       }
       const params = new URLSearchParams()
       if (filters.min_score) params.append('min_score', filters.min_score)
@@ -82,8 +79,6 @@ export default function EvaluationsTab({ isActive = true }: { isActive?: boolean
     } finally {
       if (showLoading) {
         setLoading(false)
-      } else {
-        setRefreshing(false)
       }
     }
   }, [filters.agent_id, filters.max_score, filters.min_score, filters.status])

@@ -410,15 +410,7 @@ export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
     }, 6000)
 
     return () => window.clearInterval(intervalId)
-  }, [
-    isActive,
-    selectedCall?.call_id,
-    selectedCallDetails?.call_id,
-    selectedCallDetails?.status,
-    selectedCallDetails?.transcript_status,
-    selectedCallDetails?.recording_url,
-    syncTranscriptStatus,
-  ])
+  }, [isActive, selectedCall?.call_id, selectedCallDetails, syncTranscriptStatus])
 
   // Fetch agent config when agent is selected
   useEffect(() => {
