@@ -50,19 +50,15 @@ export default function EvaluationsTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters])
 
+  // Auto-refresh evaluations every 10 seconds
   useEffect(() => {
-    const hasProcessingRows = evaluations.some((evaluation) => evaluation.status === 'processing')
-    if (!hasProcessingRows) {
-      return
-    }
-
     const intervalId = window.setInterval(() => {
       void fetchEvaluations()
     }, 10000)
 
     return () => window.clearInterval(intervalId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [evaluations])
+  }, [filters])
 
   const fetchAgents = async () => {
     try {

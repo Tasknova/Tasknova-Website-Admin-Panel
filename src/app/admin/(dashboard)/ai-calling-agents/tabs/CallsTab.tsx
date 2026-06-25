@@ -270,6 +270,15 @@ export default function CallsTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters])
 
+  // Auto-refresh calls every 8 seconds
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      fetchCalls()
+    }, 8000)
+    return () => window.clearInterval(intervalId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters])
+
   // Fetch agent config when agent is selected
   useEffect(() => {
     if (selectedAgent) {
