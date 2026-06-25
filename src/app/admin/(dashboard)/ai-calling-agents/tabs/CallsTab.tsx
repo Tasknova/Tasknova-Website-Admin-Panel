@@ -10,13 +10,25 @@ interface Call {
   status: string
   call_type: string
   duration: number
-  recording_url: string
+  recording_url: string | null
   transcript_status: string
   outcome: string
+  customer_number: string
+  agent_number: string
+  did: string
+  agent_config: Record<string, string> | null
   created_at: string
   ai_agents: { name: string }
-  ai_transcripts: [{ summary: string; call_outcome: string }]
-  ai_evaluations: [{ score: number; issues: string[]; suggestions: string[] }]
+  ai_transcripts: Array<{ summary: string; call_outcome: string }>
+  ai_evaluations: Array<{
+    id?: string
+    status?: 'processing' | 'completed' | 'failed'
+    score: number | null
+    overall_score?: number | null
+    issues: string[]
+    suggestions: string[]
+    error_message?: string | null
+  }>
 }
 
 export default function CallsTab() {
@@ -44,22 +56,60 @@ export default function CallsTab() {
   } | null>(null)
   const [showStatusModal, setShowStatusModal] = useState(false)
 
-  // Agent config form state (for Collection Bot)
-  const [agentConfig, setAgentConfig] = useState({
-    customer_name: '',
-    jewellery_shop_name: '',
-    pending_amount: '',
-    last_call_date: '',
-  })
+  // Agent config form state — dynamic per agent's call_infields
+  const [agentCallInfields, setAgentCallInfields] = useState<Array<{
+    field_name: string
+    field_type: string
+    field_enum?: string[] | null
+    is_visible?: boolean
+  }>>([])
+  const [agentConfig, setAgentConfig] = useState<Record<string, string>>({})
+
+  // Call Again state — pre-fills form when re-calling
+  const [callAgainData, setCallAgainData] = useState<{
+    customer_number: string
+    agent_id: string
+    did: string
+    agent_config: Record<string, string> | null
+  } | null>(null)
 
   const fetchAgents = async () => {
     try {
-      const response = await fetch('/api/ai-agents/index')
+      const response = await fetch('/api/ai-agents/index', { cache: 'no-store' })
       if (!response.ok) throw new Error('Failed to fetch agents')
       const result = await response.json()
       setAgents(result.agents || [])
     } catch (error) {
       console.error('Error fetching agents:', error)
+    }
+  }
+
+  const fetchAgentConfig = async (agentId: string) => {
+    try {
+      const response = await fetch(`/api/ai-agents/${agentId}/config`, { cache: 'no-store' })
+      if (!response.ok) {
+        setAgentCallInfields([])
+        setAgentConfig({})
+        return
+      }
+      const result = await response.json()
+      const rawInfields = result.data?.call_infields || []
+      const infields = rawInfields.map((f: unknown) => {
+        if (typeof f === 'string') {
+          try { return JSON.parse(f) } catch { return null }
+        }
+        return f
+      }).filter(Boolean)
+      setAgentCallInfields(infields)
+      const initialValues: Record<string, string> = {}
+      infields.forEach((f: { field_name: string }) => {
+        initialValues[f.field_name] = ''
+      })
+      setAgentConfig(initialValues)
+    } catch (error) {
+      console.error('Error fetching agent config:', error)
+      setAgentCallInfields([])
+      setAgentConfig({})
     }
   }
 
@@ -70,8 +120,9 @@ export default function CallsTab() {
       if (filters.agent_id) params.append('agent_id', filters.agent_id)
       if (filters.status) params.append('status', filters.status)
       if (filters.call_type) params.append('call_type', filters.call_type)
+      params.append('_t', Date.now().toString())
 
-      const response = await fetch(`/api/ai-agents/calls?${params}`)
+      const response = await fetch(`/api/ai-agents/calls?${params}`, { cache: 'no-store' })
       if (!response.ok) throw new Error('Failed to fetch calls')
       const result = await response.json()
       setCalls(result.calls || [])
@@ -86,9 +137,11 @@ export default function CallsTab() {
   const fetchCallDetails = async (callId: string) => {
     try {
       setLoadingDetails(true)
-      const response = await fetch(`/api/ai-agents/calls/${callId}`)
-      if (!response.ok) throw new Error('Failed to fetch call details')
+      const response = await fetch(`/api/ai-agents/calls/${callId}`, { cache: 'no-store' })
       const result = await response.json()
+      if (!response.ok || !result?.call) {
+        throw new Error(result?.error || 'Failed to fetch call details')
+      }
       setSelectedCallDetails(result.call)
     } catch (error) {
       console.error('Error fetching call details:', error)
@@ -103,8 +156,10 @@ export default function CallsTab() {
       const response = await fetch(`/api/ai-agents/calls/${callId}/transcript-status`, {
         method: 'POST',
       })
-      if (!response.ok) throw new Error('Failed to check transcript status')
       const result = await response.json()
+      if (!response.ok || !result?.call) {
+        throw new Error(result?.error || 'Failed to check transcript status')
+      }
       setSelectedCallDetails(result.call)
       toast.success('Transcript status updated')
     } catch (error) {
@@ -132,14 +187,15 @@ export default function CallsTab() {
         transcript_language: 'en',
       }
 
-      // Add agent_config if any fields are filled
+      // Add agent_config from dynamic fields
       const hasAgentConfig = Object.values(agentConfig).some(val => val.trim() !== '')
       if (hasAgentConfig) {
         requestBody.agent_config = {}
-        if (agentConfig.customer_name.trim()) requestBody.agent_config.customer_name = agentConfig.customer_name.trim()
-        if (agentConfig.jewellery_shop_name.trim()) requestBody.agent_config.jewellery_shop_name = agentConfig.jewellery_shop_name.trim()
-        if (agentConfig.pending_amount.trim()) requestBody.agent_config.pending_amount = agentConfig.pending_amount.trim()
-        if (agentConfig.last_call_date.trim()) requestBody.agent_config.last_call_date = agentConfig.last_call_date.trim()
+        for (const [key, val] of Object.entries(agentConfig)) {
+          if (val.trim()) {
+            requestBody.agent_config[key] = val.trim()
+          }
+        }
       }
 
       console.log('Sending initiate call request:', requestBody)
@@ -178,12 +234,7 @@ export default function CallsTab() {
         setCustomerNumber('')
         setSelectedAgent('')
         setOrganizationDid('')
-        setAgentConfig({
-          customer_name: '',
-          jewellery_shop_name: '',
-          pending_amount: '',
-          last_call_date: '',
-        })
+        setAgentConfig({})
         toast.success(`Call initiated! ID: ${result.call_id}`)
         
         // Refresh calls list after a delay
@@ -219,6 +270,31 @@ export default function CallsTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters])
 
+  // Fetch agent config when agent is selected
+  useEffect(() => {
+    if (selectedAgent) {
+      fetchAgentConfig(selectedAgent)
+    } else {
+      setAgentCallInfields([])
+      setAgentConfig({})
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedAgent])
+
+  // Pre-fill form when "Call Again" is triggered
+  useEffect(() => {
+    if (callAgainData) {
+      setCustomerNumber(callAgainData.customer_number || '')
+      setSelectedAgent(callAgainData.agent_id || '')
+      setOrganizationDid(callAgainData.did || '')
+      if (callAgainData.agent_config) {
+        setAgentConfig({ ...callAgainData.agent_config } as Record<string, string>)
+      }
+      setCallAgainData(null)
+      toast.success('Form pre-filled from previous call. Click Make Call to dial again.')
+    }
+  }, [callAgainData])
+
   if (selectedCall) {
     return (
       <CallDetail 
@@ -229,6 +305,11 @@ export default function CallsTab() {
           setSelectedCallDetails(null)
         }}
         onRetryTranscript={() => selectedCallDetails && retryTranscriptStatus(selectedCallDetails.call_id)}
+        onCallAgain={(callData) => {
+          setSelectedCall(null)
+          setSelectedCallDetails(null)
+          setCallAgainData(callData)
+        }}
       />
     )
   }
@@ -363,68 +444,48 @@ export default function CallsTab() {
             </button>
           </div>
 
-          {/* Agent Config Fields - Conditional for Collection Bot */}
-          {selectedAgent && agents.find(a => a.agent_id === selectedAgent)?.name.toLowerCase().includes('collection') && (
+          {/* Agent Config Fields — dynamic from call_infields */}
+          {selectedAgent && agentCallInfields.length > 0 && (
             <div className="bg-white rounded-lg border border-blue-300 p-4">
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">Collection Bot Configuration</h3>
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">Agent Configuration</h3>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Customer Name
-                  </label>
-                  <input
-                    type="text"
-                    value={agentConfig.customer_name}
-                    onChange={(e) => setAgentConfig({ ...agentConfig, customer_name: e.target.value })}
-                    placeholder="e.g., Raj"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    disabled={initiatingCall}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Jewellery Shop Name
-                  </label>
-                  <input
-                    type="text"
-                    value={agentConfig.jewellery_shop_name}
-                    onChange={(e) => setAgentConfig({ ...agentConfig, jewellery_shop_name: e.target.value })}
-                    placeholder="e.g., Tanishq"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    disabled={initiatingCall}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Pending Amount
-                  </label>
-                  <input
-                    type="text"
-                    value={agentConfig.pending_amount}
-                    onChange={(e) => setAgentConfig({ ...agentConfig, pending_amount: e.target.value })}
-                    placeholder="e.g., 15000"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    disabled={initiatingCall}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Last Call Date
-                  </label>
-                  <input
-                    type="date"
-                    value={agentConfig.last_call_date}
-                    onChange={(e) => {
-                      console.log('Date input changed to:', e.target.value)
-                      setAgentConfig({ ...agentConfig, last_call_date: e.target.value })
-                    }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    disabled={initiatingCall}
-                  />
-                </div>
+                {agentCallInfields.filter(f => f.field_name).map((field) => (
+                  <div key={field.field_name}>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      {(field.field_name || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                    </label>
+                    {field.field_type === 'DATE' ? (
+                      <input
+                        type="date"
+                        value={agentConfig[field.field_name] || ''}
+                        onChange={(e) => setAgentConfig({ ...agentConfig, [field.field_name]: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        disabled={initiatingCall}
+                      />
+                    ) : field.field_enum && field.field_enum.length > 0 ? (
+                      <select
+                        value={agentConfig[field.field_name] || ''}
+                        onChange={(e) => setAgentConfig({ ...agentConfig, [field.field_name]: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        disabled={initiatingCall}
+                      >
+                        <option value="">Select...</option>
+                        {field.field_enum.map((opt) => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={agentConfig[field.field_name] || ''}
+                        onChange={(e) => setAgentConfig({ ...agentConfig, [field.field_name]: e.target.value })}
+                        placeholder={`Enter ${field.field_name.replace(/_/g, ' ')}`}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        disabled={initiatingCall}
+                      />
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -433,7 +494,18 @@ export default function CallsTab() {
 
       {/* Call History Section */}
       <div className="space-y-4">
-        <h3 className="text-lg font-semibold text-gray-900">Call History</h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-gray-900">Call History</h3>
+          <button
+            onClick={fetchCalls}
+            className="px-3 py-1.5 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition flex items-center gap-1.5"
+          >
+            <svg className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Refresh
+          </button>
+        </div>
 
         {/* Filters */}
         <div className="bg-white rounded-lg border border-gray-200 p-4 flex gap-4 flex-wrap">
@@ -501,6 +573,7 @@ export default function CallsTab() {
                   className="hover:bg-gray-50 cursor-pointer"
                   onClick={() => {
                     setSelectedCall(call)
+                    setSelectedCallDetails(null)
                     fetchCallDetails(call.call_id)
                   }}
                 >
@@ -530,7 +603,7 @@ export default function CallsTab() {
   )
 }
 
-function CallDetail({ call, loading, onBack, onRetryTranscript }: { call: Call | null; loading?: boolean; onBack: () => void; onRetryTranscript?: () => void }) {
+function CallDetail({ call, loading, onBack, onRetryTranscript, onCallAgain }: { call: Call | null; loading?: boolean; onBack: () => void; onRetryTranscript?: () => void; onCallAgain?: (data: { customer_number: string; agent_id: string; did: string; agent_config: Record<string, string> | null }) => void }) {
   if (loading) {
     return (
       <div className="space-y-6">
@@ -588,7 +661,23 @@ function CallDetail({ call, loading, onBack, onRetryTranscript }: { call: Call |
         {/* Call Details & Transcript */}
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-white rounded-lg border border-gray-200 p-6">
-            <h2 className="text-lg font-bold text-gray-900">Call Details</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold text-gray-900">Call Details</h2>
+              {onCallAgain && (
+                <button
+                  onClick={() => onCallAgain({
+                    customer_number: call.customer_number || '',
+                    agent_id: call.agent_id || '',
+                    did: call.did || '',
+                    agent_config: call.agent_config || null,
+                  })}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm font-medium flex items-center gap-2"
+                >
+                  <Phone className="w-4 h-4" />
+                  Call Again
+                </button>
+              )}
+            </div>
             <div className="grid grid-cols-2 gap-4 mt-4">
               <DetailItem label="Call ID" value={call.call_id} />
               <DetailItem label="Agent" value={call.ai_agents?.name || '-'} />
@@ -596,12 +685,14 @@ function CallDetail({ call, loading, onBack, onRetryTranscript }: { call: Call |
               <DetailItem label="Status" value={call.status} />
               <DetailItem label="Type" value={call.call_type} />
               <DetailItem label="Created" value={new Date(call.created_at).toLocaleString()} />
+              <DetailItem label="Customer Number" value={call.customer_number || '-'} />
+              <DetailItem label="DID" value={call.did || '-'} />
             </div>
           </div>
 
-          {/* Transcript Status & Details */}
+          {/* Recording Status & Details */}
           <div className="bg-white rounded-lg border border-gray-200 p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Transcript Status</h3>
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Recording Status</h3>
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -678,23 +769,46 @@ function CallDetail({ call, loading, onBack, onRetryTranscript }: { call: Call |
         {/* Sidebar - Recording & Evaluation */}
         <div className="space-y-6">
           {/* Recording */}
-          {call.recording_url && (
-            <div className="bg-white rounded-lg border border-gray-200 p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Recording</h3>
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Recording</h3>
+            {call.recording_url ? (
               <audio controls className="w-full">
                 <source src={call.recording_url} type="audio/mpeg" />
                 Your browser does not support the audio element.
               </audio>
-            </div>
-          )}
+            ) : (
+              <div className="flex items-center gap-2 text-sm text-gray-500">
+                <div className="w-2 h-2 bg-yellow-400 rounded-full animate-pulse"></div>
+                Recording pending — check status above to refresh
+              </div>
+            )}
+          </div>
 
           {/* Evaluation */}
           {evaluation && (
             <div className="bg-white rounded-lg border border-gray-200 p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Evaluation</h3>
               <div className="mb-4">
-                <p className="text-3xl font-bold text-purple-600">{evaluation.score.toFixed(2)}</p>
-                <p className="text-sm text-gray-600">Evaluation Score</p>
+                {evaluation.status === 'processing' ? (
+                  <>
+                    <p className="text-lg font-semibold text-blue-600">Processing...</p>
+                    <p className="text-sm text-gray-600">Evaluation has started and will appear here when complete.</p>
+                  </>
+                ) : evaluation.status === 'failed' ? (
+                  <>
+                    <p className="text-lg font-semibold text-red-600">Evaluation Failed</p>
+                    <p className="text-sm text-gray-600">{evaluation.error_message || 'Unable to process this call.'}</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-3xl font-bold text-purple-600">
+                      {typeof (evaluation.overall_score ?? evaluation.score) === 'number'
+                        ? (evaluation.overall_score ?? evaluation.score)?.toFixed(2)
+                        : '-'}
+                    </p>
+                    <p className="text-sm text-gray-600">Evaluation Score</p>
+                  </>
+                )}
               </div>
 
               {evaluation.issues && evaluation.issues.length > 0 && (

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@/lib/supabase'
 import { getIndusLabsAccessToken, logAuditEvent } from '@/lib/aiAgentsUtils'
+import { triggerEvaluationPipeline } from '@/lib/aiCallingEvaluation'
 
 interface InitiateCallRequest {
   customer_number: string
@@ -296,6 +297,13 @@ async function pollTranscriptInBackground(
               status: 'completed',
             })
             .eq('call_id', call_id)
+
+          if (recordingUrl) {
+            await triggerEvaluationPipeline({
+              callId: call_id,
+              recordingUrl,
+            })
+          }
 
           await logAuditEvent('call.transcript.ready', {
             call_id,

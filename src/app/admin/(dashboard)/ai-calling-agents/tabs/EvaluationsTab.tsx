@@ -1,21 +1,31 @@
 'use client'
+
+import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
-import { ChevronRight } from 'lucide-react'
+import { AlertCircle, ChevronRight, Loader2, RefreshCw } from 'lucide-react'
 
 interface Evaluation {
   id: string
   call_id: string
-  score: number
+  status: 'processing' | 'completed' | 'failed'
+  score: number | null
+  overall_score: number | null
+  overall_feedback?: string | null
   issues: string[]
   suggestions: string[]
+  error_message?: string | null
+  processed_at?: string | null
   created_at: string
   ai_calls: {
     call_id: string
     agent_id: string
+    customer_number: string | null
+    status: string
     call_type: string
     duration: number
     created_at: string
+    outcome?: string | null
     ai_agents: { name: string }
   }
 }
@@ -23,23 +33,36 @@ interface Evaluation {
 export default function EvaluationsTab() {
   const [evaluations, setEvaluations] = useState<Evaluation[]>([])
   const [loading, setLoading] = useState(true)
-  const [selectedEval, setSelectedEval] = useState<Evaluation | null>(null)
   const [filters, setFilters] = useState({
     min_score: '',
     max_score: '',
     agent_id: '',
+    status: '',
   })
   const [agents, setAgents] = useState<Array<{ agent_id: string; name: string }>>([])
-
+  const [reEvaluating, setReEvaluating] = useState(false)
   useEffect(() => {
-    fetchAgents()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void fetchAgents()
   }, [])
 
   useEffect(() => {
-    fetchEvaluations()
+    void fetchEvaluations()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters])
+
+  useEffect(() => {
+    const hasProcessingRows = evaluations.some((evaluation) => evaluation.status === 'processing')
+    if (!hasProcessingRows) {
+      return
+    }
+
+    const intervalId = window.setInterval(() => {
+      void fetchEvaluations()
+    }, 10000)
+
+    return () => window.clearInterval(intervalId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [evaluations])
 
   const fetchAgents = async () => {
     try {
@@ -59,8 +82,9 @@ export default function EvaluationsTab() {
       if (filters.min_score) params.append('min_score', filters.min_score)
       if (filters.max_score) params.append('max_score', filters.max_score)
       if (filters.agent_id) params.append('agent_id', filters.agent_id)
+      if (filters.status) params.append('status', filters.status)
 
-      const response = await fetch(`/api/ai-agents/evaluations?${params}`)
+      const response = await fetch(`/api/ai-agents/evaluations?${params}`, { cache: 'no-store' })
       if (!response.ok) throw new Error('Failed to fetch evaluations')
       const result = await response.json()
       setEvaluations(result.evaluations || [])
@@ -72,46 +96,83 @@ export default function EvaluationsTab() {
     }
   }
 
-  if (selectedEval) {
-    return <EvaluationDetail eval={selectedEval} onBack={() => setSelectedEval(null)} />
+  const reEvaluateAll = async () => {
+    try {
+      setReEvaluating(true)
+      const response = await fetch('/api/ai-agents/evaluations/re-evaluate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ all: true }),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Failed to trigger evaluations')
+      toast.success(`Triggered ${result.triggered} evaluations (${result.skipped} already completed)`)
+      setTimeout(() => fetchEvaluations(), 2000)
+    } catch (error) {
+      console.error('Re-evaluate error:', error)
+      toast.error(error instanceof Error ? error.message : 'Failed to trigger evaluations')
+    } finally {
+      setReEvaluating(false)
+    }
   }
 
   return (
     <div className="space-y-4">
-      {/* Filters */}
-      <div className="bg-white rounded-lg border border-gray-200 p-4 flex gap-4 flex-wrap">
-        <input
-          type="number"
-          min="0"
-          max="100"
-          placeholder="Min Score"
-          value={filters.min_score}
-          onChange={(e) => setFilters({ ...filters, min_score: e.target.value })}
-          className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-32"
-        />
+      <div className="flex items-center justify-between">
+        <div className="bg-white rounded-lg border border-gray-200 p-4 flex gap-4 flex-wrap flex-1">
+          <input
+            type="number"
+            min="0"
+            max="100"
+            placeholder="Min Score"
+            value={filters.min_score}
+            onChange={(e) => setFilters({ ...filters, min_score: e.target.value })}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-32"
+          />
 
-        <input
-          type="number"
-          min="0"
-          max="100"
-          placeholder="Max Score"
-          value={filters.max_score}
-          onChange={(e) => setFilters({ ...filters, max_score: e.target.value })}
-          className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-32"
-        />
+          <input
+            type="number"
+            min="0"
+            max="100"
+            placeholder="Max Score"
+            value={filters.max_score}
+            onChange={(e) => setFilters({ ...filters, max_score: e.target.value })}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-32"
+          />
 
-        <select
-          value={filters.agent_id}
-          onChange={(e) => setFilters({ ...filters, agent_id: e.target.value })}
-          className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+          <select
+            value={filters.agent_id}
+            onChange={(e) => setFilters({ ...filters, agent_id: e.target.value })}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+          >
+            <option value="">All Agents</option>
+            {agents.map((agent) => (
+              <option key={agent.agent_id} value={agent.agent_id}>
+                {agent.name}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={filters.status}
+            onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+          >
+            <option value="">All Status</option>
+            <option value="processing">Processing</option>
+            <option value="completed">Completed</option>
+            <option value="failed">Failed</option>
+          </select>
+        </div>
+
+        <button
+          onClick={reEvaluateAll}
+          disabled={reEvaluating}
+          className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 text-sm font-medium ml-4 shrink-0"
         >
-          <option value="">All Agents</option>
-          {agents.map((agent) => (
-            <option key={agent.agent_id} value={agent.agent_id}>
-              {agent.name}
-            </option>
-          ))}
-        </select>
+          <RefreshCw className={`w-4 h-4 ${reEvaluating ? 'animate-spin' : ''}`} />
+          {reEvaluating ? 'Evaluating...' : 'Re-evaluate All'}
+        </button>
       </div>
 
       {loading ? (
@@ -125,34 +186,45 @@ export default function EvaluationsTab() {
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600">Call ID</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600">Call</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600">Customer</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600">Date</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600">Status</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-600">Agent</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600">Score</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600">Issues</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600">Created</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600">Overall Score</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-600"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
               {evaluations.map((evaluation) => (
-                <tr
-                  key={evaluation.id}
-                  className="hover:bg-gray-50 cursor-pointer"
-                  onClick={() => setSelectedEval(evaluation)}
-                >
-                  <td className="px-6 py-4 text-sm font-mono text-gray-900">{evaluation.call_id.substring(0, 12)}...</td>
+                <tr key={evaluation.id} className="hover:bg-gray-50">
+                  <td className="px-6 py-4">
+                    <div className="text-sm font-mono text-gray-900">{evaluation.call_id.substring(0, 12)}...</div>
+                    <div className="text-xs text-gray-500">{evaluation.ai_calls?.call_type || 'unknown'}</div>
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-600">
+                    {evaluation.ai_calls?.customer_number || '-'}
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-600">
+                    {new Date(evaluation.created_at).toLocaleString()}
+                  </td>
+                  <td className="px-6 py-4">
+                    <StatusBadge status={evaluation.status} />
+                  </td>
                   <td className="px-6 py-4 text-sm text-gray-600">{evaluation.ai_calls?.ai_agents?.name || '-'}</td>
                   <td className="px-6 py-4">
-                    <ScoreBadge score={evaluation.score} />
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-600">
-                    {evaluation.issues?.length || 0} issues
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-600">
-                    {new Date(evaluation.created_at).toLocaleDateString()}
+                    <ScoreBadge score={evaluation.overall_score ?? evaluation.score} status={evaluation.status} />
+                    {evaluation.status === 'failed' && evaluation.error_message ? (
+                      <p className="mt-1 max-w-xs truncate text-xs text-red-600">{evaluation.error_message}</p>
+                    ) : null}
                   </td>
                   <td className="px-6 py-4 text-right">
-                    <ChevronRight className="w-4 h-4 text-gray-400" />
+                    <Link
+                      href={`/admin/ai-calling-agents/evaluations/${evaluation.id}`}
+                      className="inline-flex items-center gap-1 text-sm font-medium text-purple-600 hover:text-purple-700"
+                    >
+                      View <ChevronRight className="w-4 h-4" />
+                    </Link>
                   </td>
                 </tr>
               ))}
@@ -164,93 +236,45 @@ export default function EvaluationsTab() {
   )
 }
 
-function EvaluationDetail({ eval: evaluation, onBack }: { eval: Evaluation; onBack: () => void }) {
+function StatusBadge({ status }: { status: Evaluation['status'] }) {
+  if (status === 'processing') {
+    return (
+      <span className="inline-flex items-center gap-2 rounded-full bg-blue-100 px-3 py-1 text-xs font-medium text-blue-800">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        Processing
+      </span>
+    )
+  }
+
+  if (status === 'failed') {
+    return (
+      <span className="inline-flex items-center gap-2 rounded-full bg-red-100 px-3 py-1 text-xs font-medium text-red-800">
+        <AlertCircle className="h-3.5 w-3.5" />
+        Failed
+      </span>
+    )
+  }
+
   return (
-    <div className="space-y-6">
-      <button
-        onClick={onBack}
-        className="text-purple-600 hover:text-purple-700 font-medium flex items-center gap-2"
-      >
-        ← Back to Evaluations
-      </button>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Content */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="bg-white rounded-lg border border-gray-200 p-6">
-            <h2 className="text-lg font-bold text-gray-900">Evaluation Details</h2>
-            <div className="grid grid-cols-2 gap-4 mt-4">
-              <DetailItem label="Call ID" value={evaluation.call_id} />
-              <DetailItem label="Agent" value={evaluation.ai_calls?.ai_agents?.name || '-'} />
-              <DetailItem label="Call Type" value={evaluation.ai_calls?.call_type || '-'} />
-              <DetailItem label="Duration" value={`${evaluation.ai_calls?.duration || 0}s`} />
-              <DetailItem label="Created" value={new Date(evaluation.created_at).toLocaleString()} />
-            </div>
-          </div>
-
-          {/* Issues */}
-          {evaluation.issues && evaluation.issues.length > 0 && (
-            <div className="bg-white rounded-lg border border-gray-200 p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Issues Found</h3>
-              <ul className="space-y-2">
-                {evaluation.issues.map((issue, idx) => (
-                  <li key={idx} className="flex items-start gap-3 p-3 bg-red-50 rounded-lg border border-red-200">
-                    <span className="text-red-600 font-bold">•</span>
-                    <span className="text-sm text-red-800">{issue}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Suggestions */}
-          {evaluation.suggestions && evaluation.suggestions.length > 0 && (
-            <div className="bg-white rounded-lg border border-gray-200 p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Suggestions</h3>
-              <ul className="space-y-2">
-                {evaluation.suggestions.map((suggestion, idx) => (
-                  <li key={idx} className="flex items-start gap-3 p-3 bg-green-50 rounded-lg border border-green-200">
-                    <span className="text-green-600 font-bold">✓</span>
-                    <span className="text-sm text-green-800">{suggestion}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-
-        {/* Score Sidebar */}
-        <div>
-          <div className="bg-white rounded-lg border border-gray-200 p-6 sticky top-6">
-            <p className="text-sm text-gray-600 mb-2">Evaluation Score</p>
-            <p className="text-5xl font-bold text-purple-600">{evaluation.score.toFixed(1)}</p>
-            <p className="text-xs text-gray-500 mt-2">out of 100</p>
-
-            <div className="mt-6 pt-6 border-t border-gray-200">
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div
-                  className="bg-purple-600 h-2 rounded-full transition-all"
-                  style={{ width: `${evaluation.score}%` }}
-                ></div>
-              </div>
-              <p className="text-xs text-gray-500 mt-2">
-                {evaluation.score >= 80
-                  ? '🟢 Excellent'
-                  : evaluation.score >= 60
-                    ? '🟡 Good'
-                    : evaluation.score >= 40
-                      ? '🟠 Fair'
-                      : '🔴 Needs Improvement'}
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <span className="inline-flex items-center rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-800">
+      Completed
+    </span>
   )
 }
 
-function ScoreBadge({ score }: { score: number }) {
+function ScoreBadge({ score, status }: { score: number | null; status: Evaluation['status'] }) {
+  if (status === 'processing') {
+    return <span className="text-sm text-blue-700">In progress...</span>
+  }
+
+  if (status === 'failed') {
+    return <span className="text-sm text-red-700">Unavailable</span>
+  }
+
+  if (typeof score !== 'number') {
+    return <span className="text-sm text-gray-500">-</span>
+  }
+
   let bgColor = 'bg-red-100 text-red-800'
   if (score >= 80) bgColor = 'bg-green-100 text-green-800'
   else if (score >= 60) bgColor = 'bg-blue-100 text-blue-800'
@@ -260,14 +284,5 @@ function ScoreBadge({ score }: { score: number }) {
     <span className={`px-2 py-1 rounded-full text-sm font-bold ${bgColor}`}>
       {score.toFixed(1)}
     </span>
-  )
-}
-
-function DetailItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="text-xs font-medium text-gray-600">{label}</p>
-      <p className="text-sm text-gray-900 mt-1">{value}</p>
-    </div>
   )
 }

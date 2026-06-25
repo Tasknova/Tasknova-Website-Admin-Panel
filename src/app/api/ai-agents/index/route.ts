@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+export const dynamic = 'force-dynamic'
 import { createServerClient } from '@/lib/supabase'
 
 export async function GET() {
@@ -32,16 +33,14 @@ export async function GET() {
       const response = NextResponse.json({
         agents: agents || [],
       })
-      // Cache for 30 seconds
-      response.headers.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60')
+      response.headers.set('Cache-Control', 'no-store, max-age=0')
       return response
     }
 
     const response = NextResponse.json({
       agents: enrichedAgents || [],
     })
-    // Cache for 30 seconds
-    response.headers.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60')
+    response.headers.set('Cache-Control', 'no-store, max-age=0')
     return response
   } catch (error) {
     console.error('Error fetching agents:', error)

@@ -1,19 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@/lib/supabase'
 
+export const dynamic = 'force-dynamic'
+
 interface EvaluationRecord {
   id: string
   call_id: string
-  score: number
+  status: 'processing' | 'completed' | 'failed'
+  score: number | null
+  overall_score: number | null
+  overall_feedback?: string | null
   issues?: string[]
   suggestions?: string[]
+  error_message?: string | null
+  processed_at?: string | null
   created_at: string
   ai_calls?: {
     call_id: string
     agent_id: string
+    customer_number: string | null
+    status: string
     call_type: string
     duration: number
     created_at: string
+    recording_url: string | null
+    outcome: string | null
+    agent_config?: Record<string, string> | null
     ai_agents?: { name: string }
   }
 }
@@ -27,6 +39,7 @@ export async function GET(req: NextRequest) {
     const minScore = searchParams.get('min_score')
     const maxScore = searchParams.get('max_score')
     const agentId = searchParams.get('agent_id')
+    const status = searchParams.get('status')
     const limit = parseInt(searchParams.get('limit') || '50', 10)
     const offset = parseInt(searchParams.get('offset') || '0', 10)
 
@@ -37,19 +50,27 @@ export async function GET(req: NextRequest) {
         ai_calls(
           call_id,
           agent_id,
+          customer_number,
+          status,
           call_type,
           duration,
           created_at,
+          recording_url,
+          outcome,
+          *,
           ai_agents(name)
         )
-      `)
+      `, { count: 'exact' })
 
     // Apply filters
     if (minScore) {
-      query = query.gte('score', parseFloat(minScore))
+      query = query.gte('overall_score', parseFloat(minScore))
     }
     if (maxScore) {
-      query = query.lte('score', parseFloat(maxScore))
+      query = query.lte('overall_score', parseFloat(maxScore))
+    }
+    if (status) {
+      query = query.eq('status', status)
     }
 
     // If agent_id filter is applied, we need to filter on the joined table
@@ -77,6 +98,8 @@ export async function GET(req: NextRequest) {
       total: count,
       limit,
       offset,
+    }, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
     })
   } catch (error) {
     console.error('Error fetching evaluations:', error)

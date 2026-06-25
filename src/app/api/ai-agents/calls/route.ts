@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+export const dynamic = 'force-dynamic'
 import { createServerClient } from '@/lib/supabase'
 
 export async function GET(req: NextRequest) {
@@ -18,8 +19,8 @@ export async function GET(req: NextRequest) {
       .select(`
         *,
         ai_agents(name),
-        ai_transcripts(summary, call_outcome),
-        ai_evaluations(score, issues, suggestions)
+        ai_transcripts(*),
+        ai_evaluations(*)
       `)
 
     // Apply filters
@@ -51,6 +52,8 @@ export async function GET(req: NextRequest) {
       total: count,
       limit,
       offset,
+    }, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
     })
   } catch (error) {
     console.error('Error fetching calls:', error)

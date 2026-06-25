@@ -51,8 +51,7 @@ export default function DashboardTab() {
     try {
       setLoading(true)
       const response = await fetch('/api/ai-agents/dashboard', {
-        // Allow use of cached responses when available
-        cache: 'force-cache',
+        cache: 'no-store',
       })
       if (!response.ok) throw new Error('Failed to fetch dashboard data')
       const result = await response.json()

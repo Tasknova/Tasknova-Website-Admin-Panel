@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@/lib/supabase'
 import {
-  evaluateCall,
   classifyCall,
   logAuditEvent,
-  getMinCallDuration,
 } from '@/lib/aiAgentsUtils'
+import { triggerEvaluationPipeline } from '@/lib/aiCallingEvaluation'
 
 interface WebhookBody {
   event: string
@@ -34,6 +33,23 @@ interface TranscriptReadyData {
 interface TranscriptFailedData {
   call_id: string
   error?: string
+}
+
+function parseTranscriptPayload(transcript: unknown): unknown[] {
+  if (Array.isArray(transcript)) {
+    return transcript
+  }
+
+  if (typeof transcript === 'string') {
+    try {
+      const parsed = JSON.parse(transcript) as unknown
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  }
+
+  return []
 }
 
 export async function POST(req: NextRequest) {
@@ -115,6 +131,13 @@ async function handleCallCompleted(
 
   await logAuditEvent('call.completed.processed', { call_id, duration })
 
+  if (recording_url) {
+    await triggerEvaluationPipeline({
+      callId: call_id,
+      recordingUrl: recording_url,
+    })
+  }
+
   return NextResponse.json({ received: true, event: 'call.completed' })
 }
 
@@ -151,12 +174,11 @@ async function handleTranscriptReady(
   data: TranscriptReadyData
 ) {
   const { call_id, transcript, summary, outcome } = data
-  const minCallDuration = await getMinCallDuration()
 
   // Get call to check duration
   const { data: callRecord } = await client
     .from('ai_calls')
-    .select('duration, agent_id')
+    .select('duration, agent_id, recording_url')
     .eq('call_id', call_id)
     .single()
 
@@ -165,7 +187,7 @@ async function handleTranscriptReady(
     return NextResponse.json({ received: true, event: 'transcript.ready' })
   }
 
-  const { duration, agent_id } = callRecord
+  const { duration, recording_url } = callRecord
 
   // Classify call
   const callType = classifyCall(duration || 0, !!transcript)
@@ -182,79 +204,23 @@ async function handleTranscriptReady(
     .eq('call_id', call_id)
 
   // Store transcript
-  const transcriptData = typeof transcript === 'string' ? JSON.parse(transcript) : transcript
+  const transcriptData = parseTranscriptPayload(transcript)
   await client.from('ai_transcripts').upsert(
     {
       call_id,
       summary,
       call_outcome: outcome,
-      history: transcriptData || [],
-      raw_text: JSON.stringify(transcriptData),
+      history: transcriptData,
+      raw_text: typeof transcript === 'string' ? transcript : JSON.stringify(transcriptData),
     },
     { onConflict: 'call_id' }
   )
 
-  // Evaluate only if valid call (duration >= minCallDuration)
-  if (callType === 'valid' && duration && duration >= minCallDuration) {
-    try {
-      const evaluation = await evaluateCall({
-        transcript_history: transcriptData,
-        summary,
-        outcome,
-        duration,
-      })
-
-      // Store evaluation
-      await client.from('ai_evaluations').upsert(
-        {
-          call_id,
-          score: evaluation.score,
-          issues: evaluation.issues,
-          suggestions: evaluation.suggestions,
-        },
-        { onConflict: 'call_id' }
-      )
-
-      // Update prompt version performance
-      const { data: callData } = await client
-        .from('ai_calls')
-        .select('prompt_version_id')
-        .eq('call_id', call_id)
-        .single()
-
-      if (callData?.prompt_version_id) {
-        const { data: promptVersion } = await client
-          .from('prompt_versions')
-          .select('performance_score, call_count')
-          .eq('id', callData.prompt_version_id)
-          .single()
-
-        if (promptVersion) {
-          const currentScore = promptVersion.performance_score || 0
-          const currentCount = promptVersion.call_count || 0
-          const newScore =
-            (currentScore * currentCount + evaluation.score) / (currentCount + 1)
-
-          await client
-            .from('prompt_versions')
-            .update({
-              performance_score: newScore,
-              call_count: currentCount + 1,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', callData.prompt_version_id)
-        }
-      }
-
-      await logAuditEvent('transcript.evaluated', {
-        call_id,
-        score: evaluation.score,
-        agent_id,
-      })
-    } catch (error) {
-      console.error('Evaluation failed:', error)
-      await logAuditEvent('transcript.evaluation.failed', { call_id, error: String(error) })
-    }
+  if (recording_url) {
+    await triggerEvaluationPipeline({
+      callId: call_id,
+      recordingUrl: recording_url,
+    })
   }
 
   return NextResponse.json({ received: true, event: 'transcript.ready' })

@@ -75,7 +75,6 @@ export default function AdminLayout({
                 alt="Tasknova Logo"
                 width={180}
                 height={40}
-                className="h-10 w-auto"
                 priority
               />
             </div>
@@ -124,7 +123,6 @@ export default function AdminLayout({
               alt="Tasknova Logo"
               width={140}
               height={32}
-              className="h-8 w-auto"
               priority
             />
           </div>

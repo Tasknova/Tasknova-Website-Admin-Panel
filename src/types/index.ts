@@ -162,6 +162,35 @@ export interface Agent {
   created_at?: string
 }
 
+export interface AICallEvaluation {
+  id: string
+  call_id: string
+  status: 'processing' | 'completed' | 'failed'
+  score: number | null
+  overall_score: number | null
+  overall_feedback?: string | null
+  transcript_text?: string | null
+  transcript_source?: string | null
+  call_summary?: string | null
+  customer_intent?: string | null
+  main_discussion_points?: string[]
+  call_outcome?: string | null
+  agent_performance?: Record<string, unknown>
+  strengths?: string[]
+  areas_for_improvement?: string[]
+  next_best_actions?: string[]
+  analysis_json?: Record<string, unknown> | null
+  issues?: string[]
+  suggestions?: string[]
+  agent_performance_score?: number | null
+  customer_engagement_score?: number | null
+  communication_score?: number | null
+  qualification_score?: number | null
+  error_message?: string | null
+  processed_at?: string | null
+  created_at: string
+}
+
 export interface ChatConversation {
   id: string
   agent_id: string

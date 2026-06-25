@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+export const dynamic = 'force-dynamic'
 import { createServerClient } from '@/lib/supabase'
 
 export async function GET() {
@@ -160,8 +161,7 @@ export async function GET() {
         worst_performing_agent: worstAgent,
       },
     })
-    // Cache dashboard for 60 seconds (it's less critical than agents list)
-    response.headers.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=120')
+    response.headers.set('Cache-Control', 'no-store, max-age=0')
     return response
   } catch (error) {
     console.error('Error fetching dashboard metrics:', error)
