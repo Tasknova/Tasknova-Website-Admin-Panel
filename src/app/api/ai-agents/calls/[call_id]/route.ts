@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@/lib/supabase'
 
+export const dynamic = 'force-dynamic'
+
 export async function GET(
   req: NextRequest,
   { params }: { params: { call_id: string } }
@@ -23,8 +25,8 @@ export async function GET(
       .select(`
         *,
         ai_agents(agent_id, name),
-        ai_transcripts(id, summary, call_outcome, history, transcript_id, raw_text),
-        ai_evaluations(id, score, issues, suggestions)
+        ai_transcripts(*),
+        ai_evaluations(*)
       `)
       .eq('call_id', call_id)
       .single()
@@ -39,6 +41,8 @@ export async function GET(
 
     return NextResponse.json({
       call,
+    }, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
     })
   } catch (error) {
     console.error('Error fetching call details:', error)

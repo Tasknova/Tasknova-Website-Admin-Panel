@@ -1,12 +1,13 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { AlertCircle, ArrowLeft, CheckCircle2, Loader2, Phone, Play } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { AICallEvaluation } from '@/types'
 import { formatDateTime } from '@/lib/utils'
+import { useAiCallingRealtime } from '@/hooks/useAiCallingRealtime'
 
 interface EvaluationDetail extends AICallEvaluation {
   ai_calls?: {
@@ -114,9 +115,11 @@ export default function EvaluationDetailPage() {
   const [evaluation, setEvaluation] = useState<EvaluationDetail | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const fetchEvaluation = async () => {
+  const fetchEvaluation = useCallback(async () => {
     try {
-      const response = await fetch(`/api/ai-agents/evaluations/${params.id}`, { cache: 'no-store' })
+      const response = await fetch(`/api/ai-agents/evaluations/${params.id}?_t=${Date.now()}`, {
+        cache: 'no-store',
+      })
       const result = await response.json()
 
       if (!response.ok) {
@@ -129,14 +132,17 @@ export default function EvaluationDetailPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [params.id])
 
   useEffect(() => {
     if (params.id) {
       void fetchEvaluation()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.id])
+  }, [fetchEvaluation, params.id])
+
+  useAiCallingRealtime(() => {
+    void fetchEvaluation()
+  }, evaluation?.status === 'processing')
 
   useEffect(() => {
     if (evaluation?.status !== 'processing') {
@@ -145,11 +151,10 @@ export default function EvaluationDetailPage() {
 
     const intervalId = window.setInterval(() => {
       void fetchEvaluation()
-    }, 10000)
+    }, 15000)
 
     return () => window.clearInterval(intervalId)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [evaluation?.status])
+  }, [evaluation?.status, fetchEvaluation])
 
   const performanceEntries = useMemo(
     () => toPerformanceEntries(evaluation?.agent_performance),

@@ -1,8 +1,10 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import { ChevronRight, Phone, Send } from 'lucide-react'
 import { Agent } from '@/types'
+import { useAiCallingRealtime } from '@/hooks/useAiCallingRealtime'
+import { isCallAwaitingRecording, mergeCallState } from '@/lib/callState'
 
 interface Call {
   call_id: string
@@ -18,6 +20,7 @@ interface Call {
   did: string
   agent_config: Record<string, string> | null
   created_at: string
+  updated_at?: string
   ai_agents: { name: string }
   ai_transcripts: Array<{ summary: string; call_outcome: string }>
   ai_evaluations: Array<{
@@ -31,9 +34,10 @@ interface Call {
   }>
 }
 
-export default function CallsTab() {
+export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
   const [calls, setCalls] = useState<Call[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [selectedCall, setSelectedCall] = useState<Call | null>(null)
   const [selectedCallDetails, setSelectedCallDetails] = useState<Call | null>(null)
   const [loadingDetails, setLoadingDetails] = useState(false)
@@ -72,6 +76,32 @@ export default function CallsTab() {
     did: string
     agent_config: Record<string, string> | null
   } | null>(null)
+
+  const detailsRequestIdRef = useRef(0)
+  const selectedCallIdRef = useRef<string | null>(null)
+  selectedCallIdRef.current = selectedCall?.call_id ?? null
+
+  const applyCallUpdate = useCallback((incoming: Call) => {
+    setSelectedCallDetails((prev) => {
+      if (!prev || prev.call_id !== incoming.call_id) {
+        return incoming
+      }
+      return mergeCallState(prev, incoming)
+    })
+
+    setSelectedCall((prev) => {
+      if (!prev || prev.call_id !== incoming.call_id) {
+        return prev
+      }
+      return mergeCallState(prev, incoming)
+    })
+
+    setCalls((prev) =>
+      prev.map((call) =>
+        call.call_id === incoming.call_id ? mergeCallState(call, incoming) : call
+      )
+    )
+  }, [])
 
   const fetchAgents = async () => {
     try {
@@ -113,9 +143,14 @@ export default function CallsTab() {
     }
   }
 
-  const fetchCalls = async () => {
+  const fetchCalls = useCallback(async (options?: { showLoading?: boolean }) => {
+    const showLoading = options?.showLoading ?? false
     try {
-      setLoading(true)
+      if (showLoading) {
+        setLoading(true)
+      } else {
+        setRefreshing(true)
+      }
       const params = new URLSearchParams()
       if (filters.agent_id) params.append('agent_id', filters.agent_id)
       if (filters.status) params.append('status', filters.status)
@@ -128,44 +163,97 @@ export default function CallsTab() {
       setCalls(result.calls || [])
     } catch (error) {
       console.error('Error fetching calls:', error)
-      toast.error('Failed to load calls')
+      if (showLoading) {
+        toast.error('Failed to load calls')
+      }
     } finally {
-      setLoading(false)
+      if (showLoading) {
+        setLoading(false)
+      } else {
+        setRefreshing(false)
+      }
     }
-  }
+  }, [filters.agent_id, filters.call_type, filters.status])
 
-  const fetchCallDetails = async (callId: string) => {
+  const fetchCallDetails = useCallback(async (callId: string, options?: { showLoading?: boolean }) => {
+    const showLoading = options?.showLoading ?? false
+    const requestId = ++detailsRequestIdRef.current
+
     try {
-      setLoadingDetails(true)
-      const response = await fetch(`/api/ai-agents/calls/${callId}`, { cache: 'no-store' })
+      if (showLoading) {
+        setLoadingDetails(true)
+      }
+
+      const response = await fetch(`/api/ai-agents/calls/${callId}?_t=${Date.now()}`, {
+        cache: 'no-store',
+      })
       const result = await response.json()
+
+      if (requestId !== detailsRequestIdRef.current) {
+        return
+      }
+
       if (!response.ok || !result?.call) {
         throw new Error(result?.error || 'Failed to fetch call details')
       }
-      setSelectedCallDetails(result.call)
-    } catch (error) {
-      console.error('Error fetching call details:', error)
-      toast.error('Failed to load call details')
-    } finally {
-      setLoadingDetails(false)
-    }
-  }
 
-  const retryTranscriptStatus = async (callId: string) => {
+      applyCallUpdate(result.call as Call)
+    } catch (error) {
+      if (requestId === detailsRequestIdRef.current) {
+        console.error('Error fetching call details:', error)
+        if (showLoading) {
+          toast.error('Failed to load call details')
+        }
+      }
+    } finally {
+      if (showLoading && requestId === detailsRequestIdRef.current) {
+        setLoadingDetails(false)
+      }
+    }
+  }, [applyCallUpdate])
+
+  const syncTranscriptStatus = useCallback(async (callId: string, options?: { notify?: boolean }) => {
     try {
       const response = await fetch(`/api/ai-agents/calls/${callId}/transcript-status`, {
         method: 'POST',
+        cache: 'no-store',
       })
       const result = await response.json()
+
       if (!response.ok || !result?.call) {
         throw new Error(result?.error || 'Failed to check transcript status')
       }
-      setSelectedCallDetails(result.call)
-      toast.success('Transcript status updated')
+
+      applyCallUpdate(result.call as Call)
+
+      if (options?.notify) {
+        const call = result.call as Call
+        if (call.recording_url) {
+          toast.success('Recording is ready')
+        } else if (call.transcript_status === 'failed' || call.status === 'failed') {
+          toast.error('Transcript processing failed')
+        } else {
+          toast.success('Transcript status updated')
+        }
+      }
     } catch (error) {
-      console.error('Error retrying transcript status:', error)
-      toast.error(error instanceof Error ? error.message : 'Failed to check transcript status')
+      if (options?.notify) {
+        console.error('Error syncing transcript status:', error)
+        toast.error(error instanceof Error ? error.message : 'Failed to check transcript status')
+      }
     }
+  }, [applyCallUpdate])
+
+  useAiCallingRealtime(() => {
+    void fetchCalls()
+    const callId = selectedCallIdRef.current
+    if (callId) {
+      void fetchCallDetails(callId)
+    }
+  }, isActive)
+
+  const retryTranscriptStatus = async (callId: string) => {
+    await syncTranscriptStatus(callId, { notify: true })
   }
 
   const handleInitiateCall = async () => {
@@ -229,18 +317,41 @@ export default function CallsTab() {
       })
       setShowStatusModal(true)
 
-      // Only clear form and refresh if successful
-      if (result.call_status === 'success') {
+      if (result.call_status === 'in_progress' || result.call_status === 'pending') {
+        const selectedAgentName = agents.find((agent) => agent.agent_id === selectedAgent)?.name || '-'
+        setCalls((current) => {
+          if (current.some((call) => call.call_id === result.call_id)) {
+            return current
+          }
+
+          const optimisticCall: Call = {
+            call_id: result.call_id,
+            agent_id: selectedAgent,
+            status: result.call_status,
+            call_type: 'unknown',
+            duration: 0,
+            recording_url: null,
+            transcript_status: 'pending',
+            outcome: '',
+            customer_number: customerNumber.trim(),
+            agent_number: selectedAgent,
+            did: organizationDid.trim(),
+            agent_config: requestBody.agent_config || null,
+            created_at: new Date().toISOString(),
+            ai_agents: { name: selectedAgentName },
+            ai_transcripts: [],
+            ai_evaluations: [],
+          }
+
+          return [optimisticCall, ...current]
+        })
+
         setCustomerNumber('')
         setSelectedAgent('')
         setOrganizationDid('')
         setAgentConfig({})
         toast.success(`Call initiated! ID: ${result.call_id}`)
-        
-        // Refresh calls list after a delay
-        setTimeout(() => {
-          fetchCalls()
-        }, 1000)
+        void fetchCalls()
       } else {
         toast.error(`Call initiation failed with status: ${result.call_status}`)
       }
@@ -266,18 +377,48 @@ export default function CallsTab() {
   }, [])
 
   useEffect(() => {
-    fetchCalls()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters])
+    void fetchCalls({ showLoading: true })
+  }, [fetchCalls])
 
-  // Auto-refresh calls every 8 seconds
+  // Fallback polling for environments where Realtime may lag
   useEffect(() => {
+    if (!isActive) {
+      return
+    }
+
     const intervalId = window.setInterval(() => {
-      fetchCalls()
-    }, 8000)
+      void fetchCalls()
+    }, 15000)
     return () => window.clearInterval(intervalId)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters])
+  }, [fetchCalls, isActive])
+
+  // Auto-sync recording/transcript from IndusLabs while call is still active
+  useEffect(() => {
+    if (!isActive || !selectedCall?.call_id || !selectedCallDetails) {
+      return
+    }
+
+    if (!isCallAwaitingRecording(selectedCallDetails)) {
+      return
+    }
+
+    const callId = selectedCall.call_id
+    void syncTranscriptStatus(callId)
+
+    const intervalId = window.setInterval(() => {
+      void syncTranscriptStatus(callId)
+    }, 6000)
+
+    return () => window.clearInterval(intervalId)
+  }, [
+    isActive,
+    selectedCall?.call_id,
+    selectedCallDetails?.call_id,
+    selectedCallDetails?.status,
+    selectedCallDetails?.transcript_status,
+    selectedCallDetails?.recording_url,
+    syncTranscriptStatus,
+  ])
 
   // Fetch agent config when agent is selected
   useEffect(() => {
@@ -330,7 +471,7 @@ export default function CallsTab() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-8 max-w-md w-full mx-4 shadow-lg">
             <div className="flex items-center justify-center mb-4">
-              {callResponse.call_status === 'success' ? (
+              {callResponse.call_status === 'in_progress' || callResponse.call_status === 'pending' ? (
                 <div className="flex items-center justify-center w-16 h-16 rounded-full bg-green-100">
                   <svg className="w-8 h-8 text-green-600" fill="currentColor" viewBox="0 0 20 20">
                     <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
@@ -346,9 +487,13 @@ export default function CallsTab() {
             </div>
 
             <h3 className={`text-xl font-semibold text-center mb-2 ${
-              callResponse.call_status === 'success' ? 'text-green-600' : 'text-red-600'
+              callResponse.call_status === 'in_progress' || callResponse.call_status === 'pending'
+                ? 'text-green-600'
+                : 'text-red-600'
             }`}>
-              {callResponse.call_status === 'success' ? 'Call Initiated Successfully!' : 'Call Initiation Failed'}
+              {callResponse.call_status === 'in_progress' || callResponse.call_status === 'pending'
+                ? 'Call Initiated Successfully!'
+                : 'Call Initiation Failed'}
             </h3>
 
             <p className="text-center text-gray-600 mb-4">
@@ -364,7 +509,7 @@ export default function CallsTab() {
               <p className="text-xs text-gray-600 mb-1">Status:</p>
               <p className="text-sm font-semibold">
                 <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                  callResponse.call_status === 'success'
+                  callResponse.call_status === 'in_progress' || callResponse.call_status === 'pending'
                     ? 'bg-green-100 text-green-800'
                     : 'bg-red-100 text-red-800'
                 }`}>
@@ -506,10 +651,10 @@ export default function CallsTab() {
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-semibold text-gray-900">Call History</h3>
           <button
-            onClick={fetchCalls}
+            onClick={() => void fetchCalls()}
             className="px-3 py-1.5 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition flex items-center gap-1.5"
           >
-            <svg className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
             Refresh
@@ -582,8 +727,8 @@ export default function CallsTab() {
                   className="hover:bg-gray-50 cursor-pointer"
                   onClick={() => {
                     setSelectedCall(call)
-                    setSelectedCallDetails(null)
-                    fetchCallDetails(call.call_id)
+                    setSelectedCallDetails(call)
+                    void fetchCallDetails(call.call_id, { showLoading: true })
                   }}
                 >
                   <td className="px-6 py-4 text-sm font-mono text-gray-900">{call.call_id.substring(0, 12)}...</td>
@@ -613,7 +758,7 @@ export default function CallsTab() {
 }
 
 function CallDetail({ call, loading, onBack, onRetryTranscript, onCallAgain }: { call: Call | null; loading?: boolean; onBack: () => void; onRetryTranscript?: () => void; onCallAgain?: (data: { customer_number: string; agent_id: string; did: string; agent_config: Record<string, string> | null }) => void }) {
-  if (loading) {
+  if (loading && !call) {
     return (
       <div className="space-y-6">
         <button
@@ -656,6 +801,8 @@ function CallDetail({ call, loading, onBack, onRetryTranscript, onCallAgain }: {
 
   const transcript = call.ai_transcripts?.[0]
   const evaluation = call.ai_evaluations?.[0]
+  const recordingReady = Boolean(call.recording_url) || call.transcript_status === 'completed'
+  const awaitingRecording = isCallAwaitingRecording(call)
 
   return (
     <div className="space-y-6">
@@ -691,7 +838,12 @@ function CallDetail({ call, loading, onBack, onRetryTranscript, onCallAgain }: {
               <DetailItem label="Call ID" value={call.call_id} />
               <DetailItem label="Agent" value={call.ai_agents?.name || '-'} />
               <DetailItem label="Duration" value={`${call.duration}s`} />
-              <DetailItem label="Status" value={call.status} />
+              <div>
+                <p className="text-xs font-medium text-gray-600">Status</p>
+                <div className="mt-1">
+                  <StatusBadge status={call.status} />
+                </div>
+              </div>
               <DetailItem label="Type" value={call.call_type} />
               <DetailItem label="Created" value={new Date(call.created_at).toLocaleString()} />
               <DetailItem label="Customer Number" value={call.customer_number || '-'} />
@@ -707,7 +859,7 @@ function CallDetail({ call, loading, onBack, onRetryTranscript, onCallAgain }: {
                 <div>
                   <p className="text-sm font-medium text-gray-700">Status:</p>
                   <div className="flex items-center gap-2 mt-2">
-                    {call.transcript_status === 'completed' && (
+                    {recordingReady && (
                       <>
                         <div className="w-2 h-2 bg-green-500 rounded-full"></div>
                         <span className="px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
@@ -715,7 +867,7 @@ function CallDetail({ call, loading, onBack, onRetryTranscript, onCallAgain }: {
                         </span>
                       </>
                     )}
-                    {call.transcript_status === 'pending' && (
+                    {!recordingReady && call.transcript_status === 'pending' && (
                       <>
                         <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></div>
                         <span className="px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
@@ -733,7 +885,7 @@ function CallDetail({ call, loading, onBack, onRetryTranscript, onCallAgain }: {
                     )}
                   </div>
                 </div>
-                {call.transcript_status === 'pending' && (
+                {awaitingRecording && (
                   <button
                     onClick={onRetryTranscript}
                     className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm font-medium"
@@ -854,6 +1006,13 @@ function CallDetail({ call, loading, onBack, onRetryTranscript, onCallAgain }: {
 }
 
 function StatusBadge({ status }: { status: string }) {
+  const normalizedStatus = status === 'success' ? 'in_progress' : status
+  const labels: Record<string, string> = {
+    pending: 'Calling',
+    in_progress: 'In Progress',
+    completed: 'Completed',
+    failed: 'Failed',
+  }
   const colors: { [key: string]: string } = {
     completed: 'bg-green-100 text-green-800',
     pending: 'bg-yellow-100 text-yellow-800',
@@ -861,8 +1020,8 @@ function StatusBadge({ status }: { status: string }) {
     failed: 'bg-red-100 text-red-800',
   }
   return (
-    <span className={`px-2 py-1 rounded-full text-xs font-medium ${colors[status] || 'bg-gray-100 text-gray-800'}`}>
-      {status}
+    <span className={`px-2 py-1 rounded-full text-xs font-medium ${colors[normalizedStatus] || 'bg-gray-100 text-gray-800'}`}>
+      {labels[normalizedStatus] || normalizedStatus}
     </span>
   )
 }

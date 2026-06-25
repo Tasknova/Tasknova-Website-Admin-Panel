@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
         ai_agents(name),
         ai_transcripts(*),
         ai_evaluations(*)
-      `)
+      `, { count: 'exact' })
 
     // Apply filters
     if (agentId) {

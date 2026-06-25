@@ -19,9 +19,6 @@ const TABS = [
 export default function AICallingAgentsPage() {
   const [activeTab, setActiveTab] = useState('dashboard')
 
-  const currentTab = TABS.find((tab) => tab.id === activeTab)
-  const CurrentComponent = currentTab?.component
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -52,7 +49,20 @@ export default function AICallingAgentsPage() {
 
         {/* Tab Content */}
         <div className="p-6">
-          {CurrentComponent && <CurrentComponent />}
+          {TABS.map((tab) => {
+            const Component = tab.component
+            const isTabActive = activeTab === tab.id
+            const syncProps =
+              tab.id === 'calls' || tab.id === 'evaluations'
+                ? { isActive: isTabActive }
+                : {}
+
+            return (
+              <div key={tab.id} className={isTabActive ? '' : 'hidden'}>
+                <Component {...syncProps} />
+              </div>
+            )
+          })}
         </div>
       </div>
     </div>

@@ -165,12 +165,12 @@ export async function POST(req: NextRequest) {
     }
 
     const normalizedCallStatus = callStatus === 'success'
-      ? 'success'
+      ? 'in_progress'
       : callStatus === 'failed'
         ? 'failed'
         : 'pending'
 
-    // Store call in database
+    // Store call in database immediately so the Calls page can show it right away
     const { error: insertError } = await client.from('ai_calls').insert({
       call_id,
       agent_id,
@@ -178,14 +178,19 @@ export async function POST(req: NextRequest) {
       agent_number,
       did,
       status: normalizedCallStatus,
-      call_type: normalizedCallStatus === 'success' ? 'valid' : normalizedCallStatus === 'failed' ? 'failed' : 'unknown',
+      call_type: normalizedCallStatus === 'failed' ? 'failed' : 'unknown',
       transcript_status: transcript ? 'pending' : 'pending',
       agent_config: agent_config || null,
+      started_at: new Date().toISOString(),
     })
 
     if (insertError) {
       console.error('Failed to store call:', insertError)
       await logAuditEvent('call.initiate.db_error', { call_id, error: insertError })
+      return NextResponse.json(
+        { error: `Failed to store call record: ${insertError.message}` },
+        { status: 500 }
+      )
     }
 
     await logAuditEvent('call.initiated', {
@@ -199,11 +204,13 @@ export async function POST(req: NextRequest) {
       success: true,
       call_id,
       call_status: normalizedCallStatus,
-      message: normalizedCallStatus === 'success' ? 'Call initiated successfully' : 'Call initiation status: ' + normalizedCallStatus,
+      message: normalizedCallStatus === 'in_progress'
+        ? 'Call initiated successfully'
+        : `Call initiation status: ${normalizedCallStatus}`,
     })
 
     // Start transcript polling in background (fire and forget)
-    if (transcript && callStatus === 'success') {
+    if (transcript && normalizedCallStatus === 'in_progress') {
       pollTranscriptInBackground(call_id, accessToken, client).catch((error) => {
         console.error('Background transcript polling error:', error)
       })
@@ -295,6 +302,7 @@ async function pollTranscriptInBackground(
               recording_url: recordingUrl,
               outcome: callOutcome,
               status: 'completed',
+              updated_at: new Date().toISOString(),
             })
             .eq('call_id', call_id)
 
@@ -321,6 +329,7 @@ async function pollTranscriptInBackground(
               duration: duration ?? 0,
               recording_url: recordingUrl,
               status: 'failed',
+              updated_at: new Date().toISOString(),
             })
             .eq('call_id', call_id)
 

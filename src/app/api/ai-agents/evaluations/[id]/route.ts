@@ -45,7 +45,9 @@ export async function GET(
       )
     }
 
-    return NextResponse.json({ evaluation: data })
+    return NextResponse.json({ evaluation: data }, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
+    })
   } catch (error) {
     console.error('Error fetching evaluation details:', error)
     return NextResponse.json(

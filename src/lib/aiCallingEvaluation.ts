@@ -344,6 +344,25 @@ async function analyzeTranscript(args: {
   return normalizeAnalysis(parseJsonObject(content))
 }
 
+async function upsertEvaluationRecord(
+  callId: string,
+  fields: Record<string, unknown>
+): Promise<void> {
+  const client = createServerClient()
+  const { error } = await client.from('ai_evaluations').upsert(
+    {
+      call_id: callId,
+      updated_at: new Date().toISOString(),
+      ...fields,
+    },
+    { onConflict: 'call_id' }
+  )
+
+  if (error) {
+    throw new Error(`Failed to upsert evaluation for ${callId}: ${error.message}`)
+  }
+}
+
 export async function triggerEvaluationPipeline(context: EvaluationPipelineContext): Promise<void> {
   const client = createServerClient()
 
@@ -357,16 +376,12 @@ export async function triggerEvaluationPipeline(context: EvaluationPipelineConte
     return
   }
 
-  await client.from('ai_evaluations').upsert(
-    {
-      call_id: context.callId,
-      status: 'processing',
-      error_message: null,
-      transcript_source: 'whisper-1',
-      processed_at: null,
-    },
-    { onConflict: 'call_id' }
-  )
+  await upsertEvaluationRecord(context.callId, {
+    status: 'processing',
+    error_message: null,
+    transcript_source: 'whisper-1',
+    processed_at: null,
+  })
 
   void runEvaluationPipeline(context).catch((error) => {
     console.error('Evaluation pipeline failed:', error)
@@ -436,35 +451,31 @@ async function runEvaluationPipeline(context: EvaluationPipelineContext): Promis
       })
       .eq('call_id', context.callId)
 
-    await client.from('ai_evaluations').upsert(
-      {
-        call_id: context.callId,
-        status: 'completed',
-        transcript_text: transcriptText,
-        transcript_source: 'whisper-1',
-        analysis_json: analysis,
-        call_summary: analysis.call_summary,
-        customer_intent: analysis.customer_intent,
-        main_discussion_points: analysis.main_discussion_points,
-        call_outcome: analysis.call_outcome,
-        agent_performance: analysis.agent_performance,
-        strengths: analysis.what_went_well,
-        areas_for_improvement: analysis.areas_for_improvement,
-        next_best_actions: analysis.next_best_actions,
-        overall_feedback: analysis.overall_feedback,
-        overall_score: analysis.scores.overall_call_score,
-        agent_performance_score: analysis.scores.agent_performance_score,
-        customer_engagement_score: analysis.scores.customer_engagement_score,
-        communication_score: analysis.scores.communication_score,
-        qualification_score: analysis.scores.qualification_score,
-        score: analysis.scores.overall_call_score,
-        issues: analysis.areas_for_improvement,
-        suggestions: analysis.next_best_actions,
-        error_message: null,
-        processed_at: new Date().toISOString(),
-      },
-      { onConflict: 'call_id' }
-    )
+    await upsertEvaluationRecord(context.callId, {
+      status: 'completed',
+      transcript_text: transcriptText,
+      transcript_source: 'whisper-1',
+      analysis_json: analysis,
+      call_summary: analysis.call_summary,
+      customer_intent: analysis.customer_intent,
+      main_discussion_points: analysis.main_discussion_points,
+      call_outcome: analysis.call_outcome,
+      agent_performance: analysis.agent_performance,
+      strengths: analysis.what_went_well,
+      areas_for_improvement: analysis.areas_for_improvement,
+      next_best_actions: analysis.next_best_actions,
+      overall_feedback: analysis.overall_feedback,
+      overall_score: analysis.scores.overall_call_score,
+      agent_performance_score: analysis.scores.agent_performance_score,
+      customer_engagement_score: analysis.scores.customer_engagement_score,
+      communication_score: analysis.scores.communication_score,
+      qualification_score: analysis.scores.qualification_score,
+      score: analysis.scores.overall_call_score,
+      issues: analysis.areas_for_improvement,
+      suggestions: analysis.next_best_actions,
+      error_message: null,
+      processed_at: new Date().toISOString(),
+    })
 
     await logAuditEvent('call.evaluation.completed', {
       call_id: context.callId,
@@ -473,15 +484,11 @@ async function runEvaluationPipeline(context: EvaluationPipelineContext): Promis
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown evaluation error'
 
-    await client.from('ai_evaluations').upsert(
-      {
-        call_id: context.callId,
-        status: 'failed',
-        error_message: errorMessage,
-        processed_at: new Date().toISOString(),
-      },
-      { onConflict: 'call_id' }
-    )
+    await upsertEvaluationRecord(context.callId, {
+      status: 'failed',
+      error_message: errorMessage,
+      processed_at: new Date().toISOString(),
+    })
 
     await logAuditEvent('call.evaluation.failed', {
       call_id: context.callId,

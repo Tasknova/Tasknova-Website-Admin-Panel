@@ -1,9 +1,10 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { AlertCircle, ChevronRight, Loader2, RefreshCw } from 'lucide-react'
+import { useAiCallingRealtime } from '@/hooks/useAiCallingRealtime'
 
 interface Evaluation {
   id: string
@@ -30,9 +31,10 @@ interface Evaluation {
   }
 }
 
-export default function EvaluationsTab() {
+export default function EvaluationsTab({ isActive = true }: { isActive?: boolean }) {
   const [evaluations, setEvaluations] = useState<Evaluation[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [filters, setFilters] = useState({
     min_score: '',
     max_score: '',
@@ -41,24 +43,6 @@ export default function EvaluationsTab() {
   })
   const [agents, setAgents] = useState<Array<{ agent_id: string; name: string }>>([])
   const [reEvaluating, setReEvaluating] = useState(false)
-  useEffect(() => {
-    void fetchAgents()
-  }, [])
-
-  useEffect(() => {
-    void fetchEvaluations()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters])
-
-  // Auto-refresh evaluations every 10 seconds
-  useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      void fetchEvaluations()
-    }, 10000)
-
-    return () => window.clearInterval(intervalId)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters])
 
   const fetchAgents = async () => {
     try {
@@ -71,14 +55,20 @@ export default function EvaluationsTab() {
     }
   }
 
-  const fetchEvaluations = async () => {
+  const fetchEvaluations = useCallback(async (options?: { showLoading?: boolean }) => {
+    const showLoading = options?.showLoading ?? false
     try {
-      setLoading(true)
+      if (showLoading) {
+        setLoading(true)
+      } else {
+        setRefreshing(true)
+      }
       const params = new URLSearchParams()
       if (filters.min_score) params.append('min_score', filters.min_score)
       if (filters.max_score) params.append('max_score', filters.max_score)
       if (filters.agent_id) params.append('agent_id', filters.agent_id)
       if (filters.status) params.append('status', filters.status)
+      params.append('_t', Date.now().toString())
 
       const response = await fetch(`/api/ai-agents/evaluations?${params}`, { cache: 'no-store' })
       if (!response.ok) throw new Error('Failed to fetch evaluations')
@@ -86,11 +76,41 @@ export default function EvaluationsTab() {
       setEvaluations(result.evaluations || [])
     } catch (error) {
       console.error('Error fetching evaluations:', error)
-      toast.error('Failed to load evaluations')
+      if (showLoading) {
+        toast.error('Failed to load evaluations')
+      }
     } finally {
-      setLoading(false)
+      if (showLoading) {
+        setLoading(false)
+      } else {
+        setRefreshing(false)
+      }
     }
-  }
+  }, [filters.agent_id, filters.max_score, filters.min_score, filters.status])
+
+  useAiCallingRealtime(() => {
+    void fetchEvaluations()
+  }, isActive)
+
+  useEffect(() => {
+    void fetchAgents()
+  }, [])
+
+  useEffect(() => {
+    void fetchEvaluations({ showLoading: true })
+  }, [fetchEvaluations])
+
+  useEffect(() => {
+    if (!isActive) {
+      return
+    }
+
+    const intervalId = window.setInterval(() => {
+      void fetchEvaluations()
+    }, 15000)
+
+    return () => window.clearInterval(intervalId)
+  }, [fetchEvaluations, isActive])
 
   const reEvaluateAll = async () => {
     try {
@@ -103,7 +123,7 @@ export default function EvaluationsTab() {
       const result = await response.json()
       if (!response.ok) throw new Error(result.error || 'Failed to trigger evaluations')
       toast.success(`Triggered ${result.triggered} evaluations (${result.skipped} already completed)`)
-      setTimeout(() => fetchEvaluations(), 2000)
+      void fetchEvaluations()
     } catch (error) {
       console.error('Re-evaluate error:', error)
       toast.error(error instanceof Error ? error.message : 'Failed to trigger evaluations')

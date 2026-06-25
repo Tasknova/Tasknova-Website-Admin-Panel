@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@/lib/supabase'
 import { getIndusLabsAccessToken, logAuditEvent } from '@/lib/aiAgentsUtils'
+import { triggerEvaluationPipeline } from '@/lib/aiCallingEvaluation'
+
+export const dynamic = 'force-dynamic'
 
 export async function POST(
   req: NextRequest,
@@ -105,8 +108,16 @@ export async function POST(
           recording_url: recordingUrl,
           outcome: callOutcome,
           status: 'completed',
+          updated_at: new Date().toISOString(),
         })
         .eq('call_id', call_id)
+
+      if (recordingUrl) {
+        await triggerEvaluationPipeline({
+          callId: call_id,
+          recordingUrl,
+        })
+      }
 
       await logAuditEvent('call.transcript.ready', {
         call_id,
@@ -123,6 +134,7 @@ export async function POST(
           duration: duration ?? 0,
           recording_url: recordingUrl,
           status: 'failed',
+          updated_at: new Date().toISOString(),
         })
         .eq('call_id', call_id)
 
@@ -138,8 +150,8 @@ export async function POST(
       .select(`
         *,
         ai_agents(agent_id, name),
-        ai_transcripts(id, summary, call_outcome, history, transcript_id, raw_text),
-        ai_evaluations(id, score, issues, suggestions)
+        ai_transcripts(*),
+        ai_evaluations(*)
       `)
       .eq('call_id', call_id)
       .single()
@@ -147,6 +159,8 @@ export async function POST(
     return NextResponse.json({
       call: updatedCall,
       transcript_status: transcriptStatus,
+    }, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
     })
   } catch (error) {
     console.error('Error checking transcript status:', error)
