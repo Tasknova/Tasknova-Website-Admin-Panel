@@ -6,7 +6,7 @@ import { triggerEvaluationPipeline } from '@/lib/aiCallingEvaluation'
 interface InitiateCallRequest {
   customer_number: string
   agent_id: string
-  did: string
+  did?: string
   transcript?: boolean
   transcript_language?: string
   agent_config?: {
@@ -21,12 +21,12 @@ interface InitiateCallRequest {
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as InitiateCallRequest
-    const { customer_number, agent_id, did, transcript = true, transcript_language = 'en', agent_config } = body
+    const { customer_number, agent_id, did: didFromBody, transcript = true, transcript_language = 'en', agent_config } = body
 
-    // Validate input
-    if (!customer_number || !agent_id || !did) {
+    // Validate required fields
+    if (!customer_number || !agent_id) {
       return NextResponse.json(
-        { error: 'customer_number, agent_id, and did are required' },
+        { error: 'customer_number and agent_id are required' },
         { status: 400 }
       )
     }
@@ -56,9 +56,24 @@ export async function POST(req: NextRequest) {
     // Use agent_id as agent_number for the API call
     const agent_number = agent_id
 
-    if (!agent_number || !did) {
+    // Resolve DID: use provided value, or fall back to most recently used DID for this agent
+    let did = didFromBody?.trim() || ''
+    if (!did) {
+      const { data: lastCall } = await client
+        .from('ai_calls')
+        .select('did')
+        .eq('agent_id', agent_id)
+        .not('did', 'is', null)
+        .neq('did', '')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+      did = lastCall?.did || ''
+    }
+
+    if (!did) {
       return NextResponse.json(
-        { error: 'Organization DID is required. Please provide it in the call form.' },
+        { error: 'Organization DID is required. No previous DID found for this agent.' },
         { status: 400 }
       )
     }
