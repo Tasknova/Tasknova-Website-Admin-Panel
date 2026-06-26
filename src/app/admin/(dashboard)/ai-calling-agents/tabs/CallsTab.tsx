@@ -256,8 +256,11 @@ export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
     await syncTranscriptStatus(callId, { notify: true })
   }
 
+  const selectedAgentObj = agents.find((agent) => agent.agent_id === selectedAgent);
+  const isShriramPFA = selectedAgentObj?.name === 'Shriram_PFA' || selectedAgentObj?.name === 'Shriram PFA';
+
   const handleInitiateCall = async () => {
-    if (!customerNumber.trim() || !selectedAgent || !organizationDid.trim()) {
+    if (!customerNumber.trim() || !selectedAgent || (!isShriramPFA && !organizationDid.trim())) {
       toast.error('Please fill in all required fields: customer number, agent, and organization DID')
       return
     }
@@ -566,23 +569,25 @@ export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
               </select>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Organization DID*
-              </label>
-              <input
-                type="tel"
-                value={organizationDid}
-                onChange={(e) => setOrganizationDid(e.target.value)}
-                placeholder="e.g., 919484956750"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                disabled={initiatingCall}
-              />
-            </div>
+            {!isShriramPFA && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Organization DID*
+                </label>
+                <input
+                  type="tel"
+                  value={organizationDid}
+                  onChange={(e) => setOrganizationDid(e.target.value)}
+                  placeholder="e.g., 919484956750"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  disabled={initiatingCall}
+                />
+              </div>
+            )}
 
             <button
               onClick={handleInitiateCall}
-              disabled={initiatingCall || !customerNumber.trim() || !selectedAgent || !organizationDid.trim()}
+              disabled={initiatingCall || !customerNumber.trim() || !selectedAgent || (!isShriramPFA && !organizationDid.trim())}
               className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               <Send className="w-4 h-4" />
