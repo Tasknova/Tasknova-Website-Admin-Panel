@@ -184,6 +184,27 @@ function formatTranscriptFromHistory(history: unknown): string {
     .join('\n')
 }
 
+async function fetchFreshRecordingUrl(callId: string): Promise<string | null> {
+  try {
+    const { getIndusLabsAccessToken } = await import('@/lib/aiAgentsUtils')
+    const accessToken = await getIndusLabsAccessToken()
+    if (!accessToken) return null
+
+    const response = await fetch(
+      `https://developer.induslabs.io/api/calls/${callId}/transcript`,
+      { method: 'GET', headers: { Authorization: `Bearer ${accessToken}` } }
+    )
+    if (!response.ok) return null
+
+    const payload = (await response.json()) as {
+      data?: { recording?: string | null }
+    }
+    return payload.data?.recording || null
+  } catch {
+    return null
+  }
+}
+
 async function transcribeRecording(recordingUrl: string): Promise<WhisperTranscriptResult> {
   const openAiApiKey = process.env.OPENAI_API_KEY
   if (!openAiApiKey) {
@@ -419,7 +440,20 @@ async function runEvaluationPipeline(context: EvaluationPipelineContext): Promis
       : []
 
     const formattedHistoryTranscript = formatTranscriptFromHistory(history)
-    const whisper = await transcribeRecording(context.recordingUrl)
+
+    // Always fetch a fresh recording URL from IndusLabs to avoid expired S3 presigned URLs (403)
+    let recordingUrl = context.recordingUrl
+    const freshUrl = await fetchFreshRecordingUrl(context.callId)
+    if (freshUrl) {
+      recordingUrl = freshUrl
+      // Persist the refreshed URL in DB so it's available next time
+      await client
+        .from('ai_calls')
+        .update({ recording_url: freshUrl, updated_at: new Date().toISOString() })
+        .eq('call_id', context.callId)
+    }
+
+    const whisper = await transcribeRecording(recordingUrl)
     const transcriptText = formattedHistoryTranscript || whisper.text
 
     const analysis = await analyzeTranscript({

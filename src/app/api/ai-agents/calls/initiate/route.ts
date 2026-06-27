@@ -294,6 +294,9 @@ async function pollTranscriptInBackground(
               history,
             })
 
+          // Use transcript.createdAt as call end time since IndusLabs doesn't return duration
+          const transcriptCreatedAt = (transcriptPayload.data?.transcript as { createdAt?: string } | null)?.createdAt || null
+
           await client
             .from('ai_calls')
             .update({
@@ -302,6 +305,7 @@ async function pollTranscriptInBackground(
               recording_url: recordingUrl,
               outcome: callOutcome,
               status: 'completed',
+              ended_at: transcriptCreatedAt || new Date().toISOString(),
               updated_at: new Date().toISOString(),
             })
             .eq('call_id', call_id)

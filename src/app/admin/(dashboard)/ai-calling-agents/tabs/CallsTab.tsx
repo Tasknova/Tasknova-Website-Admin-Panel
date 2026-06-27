@@ -21,6 +21,8 @@ interface Call {
   agent_config: Record<string, string> | null
   created_at: string
   updated_at?: string
+  started_at?: string | null
+  ended_at?: string | null
   ai_agents: { name: string }
   ai_transcripts: Array<{ summary: string; call_outcome: string }>
   ai_evaluations: Array<{
@@ -33,6 +35,34 @@ interface Call {
     error_message?: string | null
   }>
 }
+
+const getActualDuration = (call: Call) => {
+  // Priority 1: use the explicit duration from DB if it's non-zero
+  if (call.duration && call.duration > 0) return call.duration;
+  // Priority 2: use started_at → ended_at (ended_at = transcript.createdAt, i.e. when call truly ended)
+  if (call.started_at && call.ended_at) {
+    const start = new Date(call.started_at).getTime();
+    const end = new Date(call.ended_at).getTime();
+    const diffSeconds = Math.floor((end - start) / 1000);
+    if (diffSeconds > 0) return diffSeconds;
+  }
+  // Priority 3: fall back to created_at → ended_at for older calls where started_at is null
+  if (call.created_at && call.ended_at) {
+    const start = new Date(call.created_at).getTime();
+    const end = new Date(call.ended_at).getTime();
+    const diffSeconds = Math.floor((end - start) / 1000);
+    if (diffSeconds > 0 && diffSeconds < 7200) return diffSeconds; // sanity cap at 2 hours
+  }
+  return 0;
+};
+
+const formatDuration = (seconds: number) => {
+  if (!seconds || seconds <= 0) return '-';
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  if (m === 0) return `${s}s`;
+  return `${m}m ${s}s`;
+};
 
 export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
   const [calls, setCalls] = useState<Call[]>([])
@@ -730,7 +760,7 @@ export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
                 >
                   <td className="px-6 py-4 text-sm font-mono text-gray-900">{call.call_id.substring(0, 12)}...</td>
                   <td className="px-6 py-4 text-sm text-gray-600">{call.ai_agents?.name || '-'}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{call.duration}s</td>
+                  <td className="px-6 py-4 text-sm text-gray-600">{formatDuration(getActualDuration(call))}</td>
                   <td className="px-6 py-4">
                     <StatusBadge status={call.status} />
                   </td>
@@ -834,7 +864,7 @@ function CallDetail({ call, loading, onBack, onRetryTranscript, onCallAgain }: {
             <div className="grid grid-cols-2 gap-4 mt-4">
               <DetailItem label="Call ID" value={call.call_id} />
               <DetailItem label="Agent" value={call.ai_agents?.name || '-'} />
-              <DetailItem label="Duration" value={`${call.duration}s`} />
+              <DetailItem label="Duration" value={formatDuration(getActualDuration(call))} />
               <div>
                 <p className="text-xs font-medium text-gray-600">Status</p>
                 <div className="mt-1">

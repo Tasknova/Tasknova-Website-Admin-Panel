@@ -100,6 +100,9 @@ export async function POST(
           history,
         })
 
+      // Use transcript.createdAt as call end time since IndusLabs doesn't return duration
+      const transcriptCreatedAt = (transcriptPayload.data?.transcript as unknown as { createdAt?: string } | null)?.createdAt || null
+
       await client
         .from('ai_calls')
         .update({
@@ -108,6 +111,7 @@ export async function POST(
           recording_url: recordingUrl,
           outcome: callOutcome,
           status: 'completed',
+          ended_at: transcriptCreatedAt || new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
         .eq('call_id', call_id)
