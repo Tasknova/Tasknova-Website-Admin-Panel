@@ -80,6 +80,7 @@ export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
 
   // Initiate call form state
   const [customerNumber, setCustomerNumber] = useState('')
+  const [customerName, setCustomerName] = useState('')
   const [selectedAgent, setSelectedAgent] = useState('')
   const [organizationDid, setOrganizationDid] = useState('')
   const [initiatingCall, setInitiatingCall] = useState(false)
@@ -290,8 +291,11 @@ export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
   const isShriramPFA = selectedAgentObj?.name === 'Shriram_PFA' || selectedAgentObj?.name === 'Shriram PFA';
 
   const handleInitiateCall = async () => {
-    if (!customerNumber.trim() || !selectedAgent || (!isShriramPFA && !organizationDid.trim())) {
-      toast.error('Please fill in all required fields: customer number, agent, and organization DID')
+    if (!customerNumber.trim() || !selectedAgent || (!isShriramPFA && !organizationDid.trim()) || (isShriramPFA && !customerName.trim())) {
+      toast.error(isShriramPFA
+        ? 'Please fill in customer number and customer name'
+        : 'Please fill in all required fields: customer number, agent, and organization DID'
+      )
       return
     }
 
@@ -303,9 +307,21 @@ export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
       const requestBody: any = {
         customer_number: customerNumber.trim(),
         agent_id: selectedAgent,
-        did: organizationDid.trim(),
         transcript: true,
         transcript_language: 'en',
+      }
+
+      // Only include DID if provided (for Shriram_PFA it's omitted and resolved server-side)
+      if (organizationDid.trim()) {
+        requestBody.did = organizationDid.trim()
+      }
+
+      // For Shriram_PFA, inject customer_name into agent_config
+      if (isShriramPFA && customerName.trim()) {
+        requestBody.agent_config = {
+          ...(requestBody.agent_config || {}),
+          customer_name: customerName.trim(),
+        }
       }
 
       // Add agent_config from dynamic fields
@@ -380,6 +396,7 @@ export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
         })
 
         setCustomerNumber('')
+        setCustomerName('')
         setSelectedAgent('')
         setOrganizationDid('')
         setAgentConfig({})
@@ -449,6 +466,7 @@ export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
   useEffect(() => {
     if (selectedAgent) {
       fetchAgentConfig(selectedAgent)
+      setCustomerName('') // reset customer name when agent changes
     } else {
       setAgentCallInfields([])
       setAgentConfig({})
@@ -615,9 +633,25 @@ export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
               </div>
             )}
 
+            {isShriramPFA && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Customer Name*
+                </label>
+                <input
+                  type="text"
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  placeholder="e.g., Mihir Sharma"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  disabled={initiatingCall}
+                />
+              </div>
+            )}
+
             <button
               onClick={handleInitiateCall}
-              disabled={initiatingCall || !customerNumber.trim() || !selectedAgent || (!isShriramPFA && !organizationDid.trim())}
+              disabled={initiatingCall || !customerNumber.trim() || !selectedAgent || (!isShriramPFA && !organizationDid.trim()) || (isShriramPFA && !customerName.trim())}
               className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               <Send className="w-4 h-4" />
