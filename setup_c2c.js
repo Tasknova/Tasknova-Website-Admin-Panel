@@ -1,4 +1,5 @@
 // Create tables using Supabase Management API
+require('dotenv').config({ path: '.env.local' });
 const https = require('https');
 
 const sql = `
@@ -57,12 +58,20 @@ CREATE TABLE IF NOT EXISTS c2c_evaluations (
 `;
 
 async function main() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  
+  if (!supabaseUrl || !serviceRoleKey) {
+    console.error('Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
+    process.exit(1);
+  }
+
   // Use pg endpoint via REST
-  const resp = await fetch('https://qdeqpgixanmuzonsoeou.supabase.co/rest/v1/rpc/exec_sql', {
+  const resp = await fetch(`${supabaseUrl}/rest/v1/rpc/exec_sql`, {
     method: 'POST',
     headers: {
-      'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFkZXFwZ2l4YW5tdXpvbnNvZW91Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDk1OTg4OCwiZXhwIjoyMDg2NTM1ODg4fQ.wasTXQC3LAnugyUHESs6xCZ1X0Ft6gt_TnTU_Otz3sE',
-      'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFkZXFwZ2l4YW5tdXpvbnNvZW91Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDk1OTg4OCwiZXhwIjoyMDg2NTM1ODg4fQ.wasTXQC3LAnugyUHESs6xCZ1X0Ft6gt_TnTU_Otz3sE',
+      'apikey': serviceRoleKey,
+      'Authorization': `Bearer ${serviceRoleKey}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({ query: sql })

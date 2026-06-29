@@ -105,8 +105,6 @@ export default function EvaluationsTab({ isActive = true }: { isActive?: boolean
       <EvaluationDetail
         evaluation={selected}
         onBack={() => setSelected(null)}
-        onReEvaluate={(ev, e) => handleReevaluate(ev, e)}
-        reEvaluatingId={reEvaluatingId}
       />
     )
   }
@@ -202,13 +200,9 @@ export default function EvaluationsTab({ isActive = true }: { isActive?: boolean
 function EvaluationDetail({
   evaluation,
   onBack,
-  onReEvaluate,
-  reEvaluatingId,
 }: {
   evaluation: C2CEvaluation
   onBack: () => void
-  onReEvaluate: (ev: C2CEvaluation, e: React.MouseEvent) => void
-  reEvaluatingId: string | null
 }) {
   const transcript = Array.isArray(evaluation.c2c_calls?.c2c_transcripts)
     ? evaluation.c2c_calls.c2c_transcripts[0]

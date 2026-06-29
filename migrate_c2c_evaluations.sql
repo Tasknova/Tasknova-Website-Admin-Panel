@@ -1,5 +1,5 @@
 -- Run this in Supabase SQL Editor to add missing columns to c2c_evaluations
--- https://supabase.com/dashboard/project/qdeqpgixanmuzonsoeou/sql/new
+-- https://supabase.com/dashboard/project/YOUR_PROJECT_REF/sql/new
 
 ALTER TABLE c2c_evaluations
   ADD COLUMN IF NOT EXISTS agent_performance_score FLOAT,

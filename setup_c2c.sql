@@ -1,5 +1,5 @@
 -- Run this SQL in your Supabase SQL Editor at:
--- https://supabase.com/dashboard/project/qdeqpgixanmuzonsoeou/sql/new
+-- https://supabase.com/dashboard/project/YOUR_PROJECT_REF/sql/new
 
 CREATE TABLE IF NOT EXISTS c2c_calls (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
