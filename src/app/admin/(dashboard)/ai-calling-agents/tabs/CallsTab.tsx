@@ -862,8 +862,10 @@ function CallDetail({ call, loading, onBack, onRetryTranscript, onCallAgain }: {
 
   const transcript = call.ai_transcripts?.[0]
   const evaluation = call.ai_evaluations?.[0]
-  const recordingReady = Boolean(call.recording_url) || call.transcript_status === 'completed'
+  const validRecordingUrl = call.recording_url && call.recording_url !== 'pending' && call.recording_url !== 'failed' ? call.recording_url : null
+  const recordingReady = Boolean(validRecordingUrl) || call.transcript_status === 'completed'
   const awaitingRecording = isCallAwaitingRecording(call)
+  const isFailedCall = call.status === 'failed' || call.call_type === 'failed'
 
   return (
     <div className="space-y-6">
@@ -967,7 +969,12 @@ function CallDetail({ call, loading, onBack, onRetryTranscript, onCallAgain }: {
           </div>
 
           {/* Transcript */}
-          {transcript && (
+          {isFailedCall ? (
+            <div className="bg-red-50 rounded-lg border border-red-200 p-6">
+              <h3 className="text-lg font-semibold text-red-900 mb-2">Call Failed</h3>
+              <p className="text-sm text-red-700">The call failed to connect or was dropped. No transcript is available.</p>
+            </div>
+          ) : transcript ? (
             <div className="bg-white rounded-lg border border-gray-200 p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Transcript</h3>
               <div className="space-y-3">
@@ -985,6 +992,10 @@ function CallDetail({ call, loading, onBack, onRetryTranscript, onCallAgain }: {
                 )}
               </div>
             </div>
+          ) : (
+            <div className="bg-white rounded-lg border border-gray-200 p-6 text-center py-8">
+              <p className="text-gray-500 text-sm">Transcript is not available yet.</p>
+            </div>
           )}
         </div>
 
@@ -993,11 +1004,15 @@ function CallDetail({ call, loading, onBack, onRetryTranscript, onCallAgain }: {
           {/* Recording */}
           <div className="bg-white rounded-lg border border-gray-200 p-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Recording</h3>
-            {call.recording_url ? (
+            {validRecordingUrl ? (
               <audio controls className="w-full">
-                <source src={call.recording_url} type="audio/mpeg" />
+                <source src={validRecordingUrl} type="audio/mpeg" />
                 Your browser does not support the audio element.
               </audio>
+            ) : isFailedCall ? (
+              <div className="text-sm text-red-500">
+                Recording failed
+              </div>
             ) : (
               <div className="flex items-center gap-2 text-sm text-gray-500">
                 <div className="w-2 h-2 bg-yellow-400 rounded-full animate-pulse"></div>
@@ -1007,7 +1022,12 @@ function CallDetail({ call, loading, onBack, onRetryTranscript, onCallAgain }: {
           </div>
 
           {/* Evaluation */}
-          {evaluation && (
+          {isFailedCall ? (
+             <div className="bg-white rounded-lg border border-gray-200 p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Evaluation</h3>
+              <p className="text-sm text-gray-500">Evaluation is not available for failed calls.</p>
+            </div>
+          ) : evaluation ? (
             <div className="bg-white rounded-lg border border-gray-200 p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Evaluation</h3>
               <div className="mb-4">
@@ -1059,7 +1079,7 @@ function CallDetail({ call, loading, onBack, onRetryTranscript, onCallAgain }: {
                 </div>
               )}
             </div>
-          )}
+          ) : null}
         </div>
       </div>
     </div>

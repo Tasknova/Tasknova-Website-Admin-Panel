@@ -1,5 +1,4 @@
 import { createServerClient } from '@/lib/supabase'
-import { logAuditEvent } from '@/lib/aiAgentsUtils'
 
 type JsonObject = Record<string, unknown>
 
@@ -52,7 +51,6 @@ function getFirstRelationRecord(value: unknown): JsonObject | null {
   if (Array.isArray(value)) {
     return isRecord(value[0]) ? value[0] : null
   }
-
   return isRecord(value) ? value : null
 }
 
@@ -62,10 +60,7 @@ function isRecord(value: unknown): value is JsonObject {
 
 function clampScore(value: unknown, fallback = 0): number {
   const parsed = typeof value === 'number' ? value : Number(value)
-  if (!Number.isFinite(parsed)) {
-    return fallback
-  }
-
+  if (!Number.isFinite(parsed)) return fallback
   return Math.max(0, Math.min(100, Math.round(parsed)))
 }
 
@@ -74,20 +69,12 @@ function asString(value: unknown, fallback = ''): string {
 }
 
 function asStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return []
-  }
-
-  return value
-    .map((item) => (typeof item === 'string' ? item.trim() : ''))
-    .filter(Boolean)
+  if (!Array.isArray(value)) return []
+  return value.map((item) => (typeof item === 'string' ? item.trim() : '')).filter(Boolean)
 }
 
 function normalizePerformanceDimension(value: unknown): PerformanceDimension {
-  if (!isRecord(value)) {
-    return { score: 0, feedback: '' }
-  }
-
+  if (!isRecord(value)) return { score: 0, feedback: '' }
   return {
     score: clampScore(value.score),
     feedback: asString(value.feedback),
@@ -97,13 +84,10 @@ function normalizePerformanceDimension(value: unknown): PerformanceDimension {
 function parseJsonObject(raw: string): JsonObject {
   try {
     const parsed = JSON.parse(raw) as unknown
-    if (isRecord(parsed)) {
-      return parsed
-    }
+    if (isRecord(parsed)) return parsed
   } catch (error) {
     throw new Error(`Failed to parse OpenAI JSON response: ${String(error)}`)
   }
-
   throw new Error('OpenAI response was not a JSON object')
 }
 
@@ -147,13 +131,8 @@ function getRecordingFileName(recordingUrl: string, contentType: string | null):
   try {
     const url = new URL(recordingUrl)
     const lastSegment = url.pathname.split('/').filter(Boolean).pop()
-    if (lastSegment) {
-      return lastSegment
-    }
-  } catch {
-    // Fall back to content type below.
-  }
-
+    if (lastSegment) return lastSegment
+  } catch {}
   if (contentType?.includes('wav')) return 'recording.wav'
   if (contentType?.includes('mpeg')) return 'recording.mp3'
   if (contentType?.includes('mp4')) return 'recording.mp4'
@@ -161,23 +140,14 @@ function getRecordingFileName(recordingUrl: string, contentType: string | null):
 }
 
 function formatTranscriptFromHistory(history: unknown): string {
-  if (!Array.isArray(history)) {
-    return ''
-  }
-
+  if (!Array.isArray(history)) return ''
   return history
     .map((entry) => {
-      if (!isRecord(entry)) {
-        return ''
-      }
-
+      if (!isRecord(entry)) return ''
       const turn = entry as TranscriptTurn
       const speaker = turn.speaker || turn.role || 'Speaker'
       const content = turn.content || turn.text || turn.message || ''
-      if (!content || typeof content !== 'string') {
-        return ''
-      }
-
+      if (!content || typeof content !== 'string') return ''
       return `${speaker}: ${content.trim()}`
     })
     .filter(Boolean)
@@ -196,9 +166,7 @@ async function fetchFreshRecordingUrl(callId: string): Promise<string | null> {
     )
     if (!response.ok) return null
 
-    const payload = (await response.json()) as {
-      data?: { recording?: string | null }
-    }
+    const payload = (await response.json()) as { data?: { recording?: string | null } }
     const recording = payload.data?.recording
     if (recording === 'pending' || recording === 'failed') return null
     return recording || null
@@ -209,31 +177,21 @@ async function fetchFreshRecordingUrl(callId: string): Promise<string | null> {
 
 async function transcribeRecording(recordingUrl: string): Promise<WhisperTranscriptResult> {
   const openAiApiKey = process.env.OPENAI_API_KEY
-  if (!openAiApiKey) {
-    throw new Error('OPENAI_API_KEY is not configured')
-  }
+  if (!openAiApiKey) throw new Error('OPENAI_API_KEY is not configured')
 
   const recordingResponse = await fetch(recordingUrl)
-  if (!recordingResponse.ok) {
-    throw new Error(`Failed to download recording: ${recordingResponse.status}`)
-  }
+  if (!recordingResponse.ok) throw new Error(`Failed to download recording: ${recordingResponse.status}`)
 
   const audioBuffer = await recordingResponse.arrayBuffer()
   const contentType = recordingResponse.headers.get('content-type')
   const formData = new FormData()
   formData.append('model', 'whisper-1')
   formData.append('response_format', 'verbose_json')
-  formData.append(
-    'file',
-    new Blob([audioBuffer], { type: contentType || 'application/octet-stream' }),
-    getRecordingFileName(recordingUrl, contentType)
-  )
+  formData.append('file', new Blob([audioBuffer], { type: contentType || 'application/octet-stream' }), getRecordingFileName(recordingUrl, contentType))
 
   const transcriptResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${openAiApiKey}`,
-    },
+    headers: { Authorization: `Bearer ${openAiApiKey}` },
     body: formData,
   })
 
@@ -242,22 +200,11 @@ async function transcribeRecording(recordingUrl: string): Promise<WhisperTranscr
     throw new Error(`Whisper transcription failed: ${transcriptResponse.status} ${errorText}`)
   }
 
-  const payload = (await transcriptResponse.json()) as {
-    text?: string
-    language?: string
-    duration?: number
-  }
-
+  const payload = (await transcriptResponse.json()) as { text?: string, language?: string, duration?: number }
   const text = payload.text?.trim()
-  if (!text) {
-    throw new Error('Whisper did not return transcript text')
-  }
+  if (!text) throw new Error('Whisper did not return transcript text')
 
-  return {
-    text,
-    language: payload.language || null,
-    duration: typeof payload.duration === 'number' ? payload.duration : null,
-  }
+  return { text, language: payload.language || null, duration: typeof payload.duration === 'number' ? payload.duration : null }
 }
 
 async function analyzeTranscript(args: {
@@ -269,12 +216,10 @@ async function analyzeTranscript(args: {
   agentName?: string | null
 }): Promise<EvaluationAnalysis> {
   const openAiApiKey = process.env.OPENAI_API_KEY
-  if (!openAiApiKey) {
-    throw new Error('OPENAI_API_KEY is not configured')
-  }
+  if (!openAiApiKey) throw new Error('OPENAI_API_KEY is not configured')
 
   const prompt = [
-    'You are evaluating an AI sales/support call.',
+    'You are evaluating a human-to-human C2C sales/support call.',
     'Return ONLY valid JSON.',
     'Score everything on a 0-100 scale.',
     'Be concise, evidence-based, and grounded in the transcript.',
@@ -311,8 +256,8 @@ async function analyzeTranscript(args: {
     '  "overall_feedback": string',
     '}',
     '',
-    `Agent name: ${args.agentName || 'Unknown'}`,
-    `Customer number: ${args.customerNumber || 'Unknown'}`,
+    `Agent (From Number): ${args.agentName || 'Unknown'}`,
+    `Customer (To Number): ${args.customerNumber || 'Unknown'}`,
     `Call duration in seconds: ${args.duration ?? 'Unknown'}`,
     `Existing outcome if any: ${args.existingOutcome || 'Unknown'}`,
     '',
@@ -325,24 +270,12 @@ async function analyzeTranscript(args: {
 
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${openAiApiKey}`,
-      'Content-Type': 'application/json',
-    },
+    headers: { Authorization: `Bearer ${openAiApiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: 'gpt-4o-mini',
       temperature: 0.2,
       response_format: { type: 'json_object' },
-      messages: [
-        {
-          role: 'system',
-          content: 'You produce strict JSON evaluations for AI calling transcripts.',
-        },
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
+      messages: [{ role: 'system', content: 'You produce strict JSON evaluations for calling transcripts.' }, { role: 'user', content: prompt }],
     }),
   })
 
@@ -351,63 +284,40 @@ async function analyzeTranscript(args: {
     throw new Error(`GPT analysis failed: ${response.status} ${errorText}`)
   }
 
-  const payload = (await response.json()) as {
-    choices?: Array<{
-      message?: {
-        content?: string
-      }
-    }>
-  }
-
+  const payload = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> }
   const content = payload.choices?.[0]?.message?.content?.trim()
-  if (!content) {
-    throw new Error('GPT analysis did not return any content')
-  }
+  if (!content) throw new Error('GPT analysis did not return any content')
 
   return normalizeAnalysis(parseJsonObject(content))
 }
 
-async function upsertEvaluationRecord(
-  callId: string,
-  fields: Record<string, unknown>
-): Promise<void> {
+async function upsertEvaluationRecord(callId: string, fields: Record<string, unknown>): Promise<void> {
   const client = createServerClient()
-  const { error } = await client.from('ai_evaluations').upsert(
-    {
-      call_id: callId,
-      updated_at: new Date().toISOString(),
-      ...fields,
-    },
+  const { error } = await client.from('c2c_evaluations').upsert(
+    { call_id: callId, updated_at: new Date().toISOString(), ...fields },
     { onConflict: 'call_id' }
   )
-
-  if (error) {
-    throw new Error(`Failed to upsert evaluation for ${callId}: ${error.message}`)
-  }
+  if (error) throw new Error(`Failed to upsert evaluation for ${callId}: ${error.message}`)
 }
 
-export async function triggerEvaluationPipeline(context: EvaluationPipelineContext): Promise<void> {
+export async function triggerEvaluationPipeline(context: EvaluationPipelineContext, force = false): Promise<void> {
   const client = createServerClient()
-
-  const { data: existing } = await client
-    .from('ai_evaluations')
-    .select('status')
-    .eq('call_id', context.callId)
-    .maybeSingle()
-
-  if (existing?.status === 'completed') {
-    return
+  if (!force) {
+    const { data: existing } = await client.from('c2c_evaluations').select('status').eq('call_id', context.callId).maybeSingle()
+    if (existing?.status === 'completed') return
   }
 
-  await upsertEvaluationRecord(context.callId, {
-    status: 'processing',
-    error_message: null,
-    transcript_source: 'whisper-1',
-    processed_at: null,
-  })
+  await upsertEvaluationRecord(context.callId, { status: 'processing', error_message: null, processed_at: null })
 
-  void runEvaluationPipeline(context).catch((error) => {
-    console.error('Evaluation pipeline failed:', error)
+  void runEvaluationPipeline(context).catch(async (error) => {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown pipeline error'
+    console.error('[C2C] Evaluation pipeline failed for', context.callId, ':', errorMessage)
+    // Always mark as failed so it doesn't stay stuck as 'processing'
+    await upsertEvaluationRecord(context.callId, {
+      status: 'failed',
+      error_message: errorMessage,
+      processed_at: new Date().toISOString(),
+    }).catch(() => {})
   })
 }
 
@@ -416,43 +326,22 @@ async function runEvaluationPipeline(context: EvaluationPipelineContext): Promis
 
   try {
     const { data: call, error: callError } = await client
-      .from('ai_calls')
-      .select(`
-        call_id,
-        agent_id,
-        duration,
-        outcome,
-        customer_number,
-        recording_url,
-        ai_agents(name),
-        ai_transcripts(summary, call_outcome, history, raw_text)
-      `)
+      .from('c2c_calls')
+      .select('call_id, duration, outcome, from_number, to_number, recording_url, c2c_transcripts(summary, call_outcome, history, raw_text)')
       .eq('call_id', context.callId)
       .single()
 
-    if (callError || !call) {
-      throw new Error(`Call not found for evaluation: ${context.callId}`)
-    }
+    if (callError || !call) throw new Error(`Call not found for evaluation: ${context.callId}`)
 
-    const transcriptRecord = getFirstRelationRecord(call.ai_transcripts)
-    const agentRecord = getFirstRelationRecord(call.ai_agents)
-
-    const history = Array.isArray(transcriptRecord?.history)
-      ? transcriptRecord.history
-      : []
-
+    const transcriptRecord = getFirstRelationRecord(call.c2c_transcripts)
+    const history = Array.isArray(transcriptRecord?.history) ? transcriptRecord.history : []
     const formattedHistoryTranscript = formatTranscriptFromHistory(history)
 
-    // Always fetch a fresh recording URL from IndusLabs to avoid expired S3 presigned URLs (403)
     let recordingUrl = context.recordingUrl
     const freshUrl = await fetchFreshRecordingUrl(context.callId)
     if (freshUrl) {
       recordingUrl = freshUrl
-      // Persist the refreshed URL in DB so it's available next time
-      await client
-        .from('ai_calls')
-        .update({ recording_url: freshUrl, updated_at: new Date().toISOString() })
-        .eq('call_id', context.callId)
+      await client.from('c2c_calls').update({ recording_url: freshUrl, updated_at: new Date().toISOString() }).eq('call_id', context.callId)
     }
 
     const whisper = await transcribeRecording(recordingUrl)
@@ -463,11 +352,11 @@ async function runEvaluationPipeline(context: EvaluationPipelineContext): Promis
       rawTranscription: whisper.text,
       existingOutcome: call.outcome || asString(transcriptRecord?.call_outcome, '') || null,
       duration: typeof call.duration === 'number' ? call.duration : whisper.duration,
-      customerNumber: call.customer_number,
-      agentName: asString(agentRecord?.name, '') || null,
+      customerNumber: call.to_number,
+      agentName: call.from_number,
     })
 
-    await client.from('ai_transcripts').upsert(
+    await client.from('c2c_transcripts').upsert(
       {
         call_id: context.callId,
         summary: analysis.call_summary,
@@ -479,18 +368,11 @@ async function runEvaluationPipeline(context: EvaluationPipelineContext): Promis
       { onConflict: 'call_id' }
     )
 
-    await client
-      .from('ai_calls')
-      .update({
-        outcome: analysis.call_outcome,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('call_id', context.callId)
+    await client.from('c2c_calls').update({ outcome: analysis.call_outcome, updated_at: new Date().toISOString() }).eq('call_id', context.callId)
 
     await upsertEvaluationRecord(context.callId, {
       status: 'completed',
       transcript_text: transcriptText,
-      transcript_source: 'whisper-1',
       analysis_json: analysis,
       call_summary: analysis.call_summary,
       customer_intent: analysis.customer_intent,
@@ -512,25 +394,9 @@ async function runEvaluationPipeline(context: EvaluationPipelineContext): Promis
       error_message: null,
       processed_at: new Date().toISOString(),
     })
-
-    await logAuditEvent('call.evaluation.completed', {
-      call_id: context.callId,
-      overall_score: analysis.scores.overall_call_score,
-    })
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown evaluation error'
-
-    await upsertEvaluationRecord(context.callId, {
-      status: 'failed',
-      error_message: errorMessage,
-      processed_at: new Date().toISOString(),
-    })
-
-    await logAuditEvent('call.evaluation.failed', {
-      call_id: context.callId,
-      error: errorMessage,
-    })
-
+    await upsertEvaluationRecord(context.callId, { status: 'failed', error_message: errorMessage, processed_at: new Date().toISOString() })
     throw error
   }
 }

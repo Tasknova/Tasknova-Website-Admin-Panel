@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
@@ -20,7 +20,8 @@ import {
   FolderKanban,
   ClipboardList,
   BrainCircuit,
-  Wand2
+  Wand2,
+  PhoneCall
 } from 'lucide-react'
 import { useState } from 'react'
 import toast from 'react-hot-toast'
@@ -40,6 +41,7 @@ const navigation = [
   { name: 'Daily Standup Meetings', href: '/admin/daily-standup-meetings', icon: ClipboardList },
   { name: 'Meetings Intelligence', href: '/admin/meetings-intelligence', icon: BrainCircuit },
   { name: 'AI Calling Agents', href: '/admin/ai-calling-agents', icon: Wand2 },
+  { name: 'C2C Calling', href: '/admin/c2c-calling', icon: PhoneCall },
   { name: 'Admins', href: '/admin/admins', icon: Shield },
 ]
 
