@@ -4,7 +4,8 @@ import {
   classifyCall,
   logAuditEvent,
 } from '@/lib/aiAgentsUtils'
-import { triggerEvaluationPipeline } from '@/lib/aiCallingEvaluation'
+import { triggerEvaluationPipeline as triggerAiEvaluationPipeline } from '@/lib/aiCallingEvaluation'
+import { triggerEvaluationPipeline as triggerC2CEvaluationPipeline } from '@/lib/c2cEvaluation'
 
 interface WebhookBody {
   event: string
@@ -99,24 +100,14 @@ async function handleCallCompleted(
 ) {
   const { call_id, duration, recording_url, end_time } = data
 
-  // Ensure idempotency - check if already processed
-  const { data: existingCall } = await client
+  // --- Handle AI calls ---
+  const { data: existingAiCall } = await client
     .from('ai_calls')
     .select('call_id')
     .eq('call_id', call_id)
     .single()
 
-  if (!existingCall) {
-    // Create new call record if not found (external call)
-    await client.from('ai_calls').insert({
-      call_id,
-      status: 'completed',
-      duration: duration || 0,
-      recording_url,
-      ended_at: end_time || new Date().toISOString(),
-    })
-  } else {
-    // Update existing call
+  if (existingAiCall) {
     await client
       .from('ai_calls')
       .update({
@@ -127,17 +118,41 @@ async function handleCallCompleted(
         updated_at: new Date().toISOString(),
       })
       .eq('call_id', call_id)
+
+    if (recording_url) {
+      await triggerAiEvaluationPipeline({ callId: call_id, recordingUrl: recording_url })
+    }
+  }
+
+  // --- Handle C2C calls ---
+  const { data: existingC2CCall } = await client
+    .from('c2c_calls')
+    .select('call_id, recording_url')
+    .eq('call_id', call_id)
+    .single()
+
+  if (existingC2CCall) {
+    const c2cRecordingUrl = recording_url || existingC2CCall.recording_url || null
+    await client
+      .from('c2c_calls')
+      .update({
+        status: 'completed',
+        duration: duration || 0,
+        recording_url: c2cRecordingUrl,
+        ended_at: end_time || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('call_id', call_id)
+
+    // Trigger C2C evaluation if recording is available
+    if (c2cRecordingUrl && c2cRecordingUrl !== 'pending' && c2cRecordingUrl !== 'failed') {
+      void triggerC2CEvaluationPipeline({ callId: call_id, recordingUrl: c2cRecordingUrl }).catch(
+        (err) => console.error('[C2C Webhook] Evaluation trigger failed:', err)
+      )
+    }
   }
 
   await logAuditEvent('call.completed.processed', { call_id, duration })
-
-  if (recording_url) {
-    await triggerEvaluationPipeline({
-      callId: call_id,
-      recordingUrl: recording_url,
-    })
-  }
-
   return NextResponse.json({ received: true, event: 'call.completed' })
 }
 
@@ -147,25 +162,35 @@ async function handleCallFailed(
 ) {
   const { call_id } = data
 
-  const { data: existingCall } = await client
+  // Update AI call if exists
+  const { data: existingAiCall } = await client
     .from('ai_calls')
     .select('call_id')
     .eq('call_id', call_id)
     .single()
 
-  if (existingCall) {
+  if (existingAiCall) {
     await client
       .from('ai_calls')
-      .update({
-        status: 'failed',
-        call_type: 'failed',
-        updated_at: new Date().toISOString(),
-      })
+      .update({ status: 'failed', call_type: 'failed', updated_at: new Date().toISOString() })
+      .eq('call_id', call_id)
+  }
+
+  // Update C2C call if exists
+  const { data: existingC2CCall } = await client
+    .from('c2c_calls')
+    .select('call_id')
+    .eq('call_id', call_id)
+    .single()
+
+  if (existingC2CCall) {
+    await client
+      .from('c2c_calls')
+      .update({ status: 'failed', transcript_status: 'failed', updated_at: new Date().toISOString() })
       .eq('call_id', call_id)
   }
 
   await logAuditEvent('call.failed.processed', { call_id })
-
   return NextResponse.json({ received: true, event: 'call.failed' })
 }
 
@@ -175,52 +200,77 @@ async function handleTranscriptReady(
 ) {
   const { call_id, transcript, summary, outcome } = data
 
-  // Get call to check duration
-  const { data: callRecord } = await client
+  // --- Handle AI calls ---
+  const { data: aiCallRecord } = await client
     .from('ai_calls')
     .select('duration, agent_id, recording_url')
     .eq('call_id', call_id)
     .single()
 
-  if (!callRecord) {
-    console.log(`Call not found: ${call_id}`)
-    return NextResponse.json({ received: true, event: 'transcript.ready' })
+  if (aiCallRecord) {
+    const { duration, recording_url } = aiCallRecord
+    const callType = classifyCall(duration || 0, !!transcript)
+
+    await client
+      .from('ai_calls')
+      .update({ call_type: callType, transcript_status: 'completed', outcome, updated_at: new Date().toISOString() })
+      .eq('call_id', call_id)
+
+    const transcriptData = parseTranscriptPayload(transcript)
+    await client.from('ai_transcripts').upsert(
+      {
+        call_id,
+        summary,
+        call_outcome: outcome,
+        history: transcriptData,
+        raw_text: typeof transcript === 'string' ? transcript : JSON.stringify(transcriptData),
+      },
+      { onConflict: 'call_id' }
+    )
+
+    if (recording_url) {
+      await triggerAiEvaluationPipeline({ callId: call_id, recordingUrl: recording_url })
+    }
   }
 
-  const { duration, recording_url } = callRecord
-
-  // Classify call
-  const callType = classifyCall(duration || 0, !!transcript)
-
-  // Update call with transcript info
-  await client
-    .from('ai_calls')
-    .update({
-      call_type: callType,
-      transcript_status: 'completed',
-      outcome,
-      updated_at: new Date().toISOString(),
-    })
+  // --- Handle C2C calls ---
+  const { data: c2cCallRecord } = await client
+    .from('c2c_calls')
+    .select('duration, recording_url')
     .eq('call_id', call_id)
+    .single()
 
-  // Store transcript
-  const transcriptData = parseTranscriptPayload(transcript)
-  await client.from('ai_transcripts').upsert(
-    {
-      call_id,
-      summary,
-      call_outcome: outcome,
-      history: transcriptData,
-      raw_text: typeof transcript === 'string' ? transcript : JSON.stringify(transcriptData),
-    },
-    { onConflict: 'call_id' }
-  )
+  if (c2cCallRecord) {
+    const transcriptData = parseTranscriptPayload(transcript)
 
-  if (recording_url) {
-    await triggerEvaluationPipeline({
-      callId: call_id,
-      recordingUrl: recording_url,
-    })
+    await client
+      .from('c2c_calls')
+      .update({ transcript_status: 'completed', outcome, status: 'completed', updated_at: new Date().toISOString() })
+      .eq('call_id', call_id)
+
+    await client.from('c2c_transcripts').upsert(
+      {
+        call_id,
+        summary,
+        call_outcome: outcome,
+        history: transcriptData,
+        raw_text: typeof transcript === 'string' ? transcript : JSON.stringify(transcriptData),
+      },
+      { onConflict: 'call_id' }
+    )
+
+    const c2cRecordingUrl = c2cCallRecord.recording_url
+    if (c2cRecordingUrl && c2cRecordingUrl !== 'pending' && c2cRecordingUrl !== 'failed') {
+      void triggerC2CEvaluationPipeline({ callId: call_id, recordingUrl: c2cRecordingUrl }).catch(
+        (err) => console.error('[C2C Webhook] Transcript-triggered evaluation failed:', err)
+      )
+    } else {
+      // No recording URL yet, but we have the transcript — still trigger evaluation
+      // The pipeline will use the transcript history directly (no Whisper needed)
+      void triggerC2CEvaluationPipeline({ callId: call_id, recordingUrl: '' }).catch(
+        (err) => console.error('[C2C Webhook] Transcript-only evaluation failed:', err)
+      )
+    }
   }
 
   return NextResponse.json({ received: true, event: 'transcript.ready' })
@@ -232,24 +282,34 @@ async function handleTranscriptFailed(
 ) {
   const { call_id } = data
 
-  const { data: callRecord } = await client
+  // Update AI call if exists
+  const { data: aiCallRecord } = await client
     .from('ai_calls')
     .select('call_id')
     .eq('call_id', call_id)
     .single()
 
-  if (callRecord) {
+  if (aiCallRecord) {
     await client
       .from('ai_calls')
-      .update({
-        call_type: 'failed',
-        transcript_status: 'failed',
-        updated_at: new Date().toISOString(),
-      })
+      .update({ call_type: 'failed', transcript_status: 'failed', updated_at: new Date().toISOString() })
+      .eq('call_id', call_id)
+  }
+
+  // Update C2C call if exists
+  const { data: c2cCallRecord } = await client
+    .from('c2c_calls')
+    .select('call_id')
+    .eq('call_id', call_id)
+    .single()
+
+  if (c2cCallRecord) {
+    await client
+      .from('c2c_calls')
+      .update({ transcript_status: 'failed', status: 'failed', updated_at: new Date().toISOString() })
       .eq('call_id', call_id)
   }
 
   await logAuditEvent('transcript.failed.processed', { call_id })
-
   return NextResponse.json({ received: true, event: 'transcript.failed' })
 }

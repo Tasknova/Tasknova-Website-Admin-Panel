@@ -336,22 +336,51 @@ async function runEvaluationPipeline(context: EvaluationPipelineContext): Promis
     const transcriptRecord = getFirstRelationRecord(call.c2c_transcripts)
     const history = Array.isArray(transcriptRecord?.history) ? transcriptRecord.history : []
     const formattedHistoryTranscript = formatTranscriptFromHistory(history)
+    const existingRawText = asString(transcriptRecord?.raw_text, '')
 
-    let recordingUrl = context.recordingUrl
-    const freshUrl = await fetchFreshRecordingUrl(context.callId)
-    if (freshUrl) {
-      recordingUrl = freshUrl
-      await client.from('c2c_calls').update({ recording_url: freshUrl, updated_at: new Date().toISOString() }).eq('call_id', context.callId)
+    // --- Transcript Strategy ---
+    // If IndusLabs already gave us a conversation history, use it directly.
+    // Only call Whisper if there is NO existing transcript (saves 10-30s per call).
+    let transcriptText: string
+    let rawTranscriptionText: string
+
+    if (formattedHistoryTranscript) {
+      // Fast path: use the existing structured transcript from IndusLabs
+      transcriptText = formattedHistoryTranscript
+      rawTranscriptionText = existingRawText || formattedHistoryTranscript
+    } else if (existingRawText) {
+      // Medium path: use raw text that was already saved
+      transcriptText = existingRawText
+      rawTranscriptionText = existingRawText
+    } else {
+      // Slow path: no transcript at all — try to fetch recording and Whisper-transcribe
+      let recordingUrl = context.recordingUrl
+      const freshUrl = await fetchFreshRecordingUrl(context.callId)
+      if (freshUrl) {
+        recordingUrl = freshUrl
+        await client.from('c2c_calls').update({ recording_url: freshUrl, updated_at: new Date().toISOString() }).eq('call_id', context.callId)
+      }
+
+      if (!recordingUrl || recordingUrl === 'pending' || recordingUrl === 'failed') {
+        throw new Error('No transcript or recording available for evaluation')
+      }
+
+      const whisper = await transcribeRecording(recordingUrl)
+      transcriptText = whisper.text
+      rawTranscriptionText = whisper.text
+
+      // Persist the whisper text so future re-evaluations are fast
+      await client.from('c2c_transcripts').upsert(
+        { call_id: context.callId, raw_text: whisper.text, updated_at: new Date().toISOString() },
+        { onConflict: 'call_id' }
+      )
     }
-
-    const whisper = await transcribeRecording(recordingUrl)
-    const transcriptText = formattedHistoryTranscript || whisper.text
 
     const analysis = await analyzeTranscript({
       transcriptText,
-      rawTranscription: whisper.text,
+      rawTranscription: rawTranscriptionText,
       existingOutcome: call.outcome || asString(transcriptRecord?.call_outcome, '') || null,
-      duration: typeof call.duration === 'number' ? call.duration : whisper.duration,
+      duration: typeof call.duration === 'number' ? call.duration : null,
       customerNumber: call.to_number,
       agentName: call.from_number,
     })
@@ -362,7 +391,7 @@ async function runEvaluationPipeline(context: EvaluationPipelineContext): Promis
         summary: analysis.call_summary,
         call_outcome: analysis.call_outcome,
         history,
-        raw_text: whisper.text,
+        raw_text: rawTranscriptionText,
         updated_at: new Date().toISOString(),
       },
       { onConflict: 'call_id' }
