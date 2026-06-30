@@ -120,7 +120,7 @@ export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
   // Form state
   const [fromNumber, setFromNumber] = useState('')
   const [toNumber, setToNumber] = useState('')
-  const [did, setDid] = useState('')
+  const [did, setDid] = useState('919484956750')
   const [transcriptEnabled, setTranscriptEnabled] = useState(true)
   const [transcriptLanguage, setTranscriptLanguage] = useState('en')
 
@@ -192,9 +192,14 @@ export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
     }
   }, [])
 
+  const isValidPhone = (num: string) => {
+    const clean = num.replace(/\D/g, '')
+    return clean.length === 10 || (clean.length === 12 && clean.startsWith('91'))
+  }
+
   const handleInitiateCall = async () => {
-    if (!fromNumber.trim() || !toNumber.trim() || !did.trim()) {
-      toast.error('Please fill in From Number, To Number, and DID')
+    if (!isValidPhone(fromNumber) || !isValidPhone(toNumber) || !did.trim()) {
+      toast.error('Please enter a valid 10-digit number for both From and To numbers')
       return
     }
 
@@ -222,7 +227,7 @@ export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
       toast.success(`Call initiated! ID: ${result.call_id}`)
       setFromNumber('')
       setToNumber('')
-      setDid('')
+      setDid('919484956750')
       await fetchCalls()
 
       // Start polling transcript
@@ -280,14 +285,15 @@ export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">DID*</label>
-              <input
-                type="tel"
+              <select
                 value={did}
                 onChange={(e) => setDid(e.target.value)}
-                placeholder="e.g. 02047320092 or 101"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                 disabled={initiatingCall}
-              />
+              >
+                <option value="">-- Select DID --</option>
+                <option value="919484956750">919484956750 (Default)</option>
+              </select>
             </div>
           </div>
 
@@ -323,7 +329,7 @@ export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
 
             <button
               onClick={handleInitiateCall}
-              disabled={initiatingCall || !fromNumber.trim() || !toNumber.trim() || !did.trim()}
+              disabled={initiatingCall || !isValidPhone(fromNumber) || !isValidPhone(toNumber) || !did.trim()}
               className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               <Send className="w-4 h-4" />
