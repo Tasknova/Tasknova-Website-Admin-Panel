@@ -5,6 +5,7 @@ import { ChevronRight, Phone, Send } from 'lucide-react'
 import { Agent } from '@/types'
 import { useAiCallingRealtime } from '@/hooks/useAiCallingRealtime'
 import { isCallAwaitingRecording, mergeCallState } from '@/lib/callState'
+import { isShriramPFAAgent } from '@/lib/aiAgentsUtils'
 
 interface Call {
   call_id: string
@@ -88,6 +89,7 @@ export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
     call_id: string
     call_status: string
     message: string
+    failure_reason?: string | null
   } | null>(null)
   const [showStatusModal, setShowStatusModal] = useState(false)
 
@@ -288,7 +290,10 @@ export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
   }
 
   const selectedAgentObj = agents.find((agent) => agent.agent_id === selectedAgent);
-  const isShriramPFA = selectedAgentObj?.name === 'Shriram_PFA' || selectedAgentObj?.name === 'Shriram PFA';
+  const isShriramPFA = isShriramPFAAgent(selectedAgentObj?.name);
+  const visibleAgentCallInfields = agentCallInfields.filter(
+    (f) => f.field_name && !(isShriramPFA && f.field_name === 'customer_name')
+  );
 
   const handleInitiateCall = async () => {
     if (!customerNumber.trim() || !selectedAgent || (!isShriramPFA && !organizationDid.trim()) || (isShriramPFA && !customerName.trim())) {
@@ -316,23 +321,18 @@ export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
         requestBody.did = organizationDid.trim()
       }
 
-      // For Shriram_PFA, inject customer_name into agent_config
-      if (isShriramPFA && customerName.trim()) {
-        requestBody.agent_config = {
-          ...(requestBody.agent_config || {}),
-          customer_name: customerName.trim(),
+      // Build agent_config from dynamic fields, then merge Shriram PFA customer_name
+      const mergedAgentConfig: Record<string, string> = {}
+      for (const [key, val] of Object.entries(agentConfig)) {
+        if (val.trim()) {
+          mergedAgentConfig[key] = val.trim()
         }
       }
-
-      // Add agent_config from dynamic fields
-      const hasAgentConfig = Object.values(agentConfig).some(val => val.trim() !== '')
-      if (hasAgentConfig) {
-        requestBody.agent_config = {}
-        for (const [key, val] of Object.entries(agentConfig)) {
-          if (val.trim()) {
-            requestBody.agent_config[key] = val.trim()
-          }
-        }
+      if (isShriramPFA && customerName.trim()) {
+        mergedAgentConfig.customer_name = customerName.trim()
+      }
+      if (Object.keys(mergedAgentConfig).length > 0) {
+        requestBody.agent_config = mergedAgentConfig
       }
 
       console.log('Sending initiate call request:', requestBody)
@@ -363,6 +363,7 @@ export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
         call_id: result.call_id,
         call_status: result.call_status,
         message: result.message,
+        failure_reason: result.failure_reason,
       })
       setShowStatusModal(true)
 
@@ -403,7 +404,7 @@ export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
         toast.success(`Call initiated! ID: ${result.call_id}`)
         void fetchCalls()
       } else {
-        toast.error(`Call initiation failed with status: ${result.call_status}`)
+        toast.error(result.failure_reason || result.message || `Call initiation failed with status: ${result.call_status}`)
       }
     } catch (error) {
       console.error('Error initiating call:', error)
@@ -481,7 +482,12 @@ export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
       setSelectedAgent(callAgainData.agent_id || '')
       setOrganizationDid(callAgainData.did || '')
       if (callAgainData.agent_config) {
-        setAgentConfig({ ...callAgainData.agent_config } as Record<string, string>)
+        const config = { ...callAgainData.agent_config } as Record<string, string>
+        if (config.customer_name) {
+          setCustomerName(config.customer_name)
+          delete config.customer_name
+        }
+        setAgentConfig(config)
       }
       setCallAgainData(null)
       toast.success('Form pre-filled from previous call. Click Make Call to dial again.')
@@ -542,6 +548,13 @@ export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
             <p className="text-center text-gray-600 mb-4">
               {callResponse.message}
             </p>
+
+            {callResponse.failure_reason && callResponse.call_status === 'failed' && (
+              <div className="bg-red-50 border border-red-200 rounded p-3 mb-4">
+                <p className="text-xs font-medium text-red-800 mb-1">Reason</p>
+                <p className="text-sm text-red-700">{callResponse.failure_reason}</p>
+              </div>
+            )}
 
             <div className="bg-gray-50 rounded p-3 mb-6">
               <p className="text-xs text-gray-600 mb-1">Call ID:</p>
@@ -660,11 +673,11 @@ export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
           </div>
 
           {/* Agent Config Fields — dynamic from call_infields */}
-          {selectedAgent && agentCallInfields.length > 0 && (
+          {selectedAgent && visibleAgentCallInfields.length > 0 && (
             <div className="bg-white rounded-lg border border-blue-300 p-4">
               <h3 className="text-sm font-semibold text-gray-700 mb-3">Agent Configuration</h3>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                {agentCallInfields.filter(f => f.field_name).map((field) => (
+                {visibleAgentCallInfields.map((field) => (
                   <div key={field.field_name}>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       {(field.field_name || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
@@ -799,7 +812,7 @@ export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
                     <StatusBadge status={call.status} />
                   </td>
                   <td className="px-6 py-4">
-                    <TypeBadge type={call.call_type} />
+                    <TypeBadge type={call.call_type} status={call.status} />
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-600">
                     {new Date(call.created_at).toLocaleDateString()}
@@ -1107,16 +1120,24 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
-function TypeBadge({ type }: { type: string }) {
+function TypeBadge({ type, status }: { type: string; status?: string }) {
+  const isCompleted = status === 'completed'
+  const displayType = isCompleted ? 'valid' : type
   const colors: { [key: string]: string } = {
     valid: 'bg-green-100 text-green-800',
     failed: 'bg-red-100 text-red-800',
     invalid: 'bg-orange-100 text-orange-800',
     unknown: 'bg-gray-100 text-gray-800',
   }
+  const labels: { [key: string]: string } = {
+    valid: 'Valid',
+    failed: 'Failed',
+    invalid: 'Invalid',
+    unknown: 'Unknown',
+  }
   return (
-    <span className={`px-2 py-1 rounded-full text-xs font-medium ${colors[type] || 'bg-gray-100 text-gray-800'}`}>
-      {type}
+    <span className={`px-2 py-1 rounded-full text-xs font-medium ${colors[displayType] || 'bg-gray-100 text-gray-800'}`}>
+      {labels[displayType] || displayType}
     </span>
   )
 }

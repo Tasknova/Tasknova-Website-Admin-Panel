@@ -2,13 +2,7 @@ import { createServerClient } from '@/lib/supabase'
 
 type JsonObject = Record<string, unknown>
 
-interface TranscriptTurn {
-  role?: string
-  speaker?: string
-  content?: string
-  text?: string
-  message?: string
-}
+
 
 interface WhisperTranscriptResult {
   text: string
@@ -203,22 +197,8 @@ function getRecordingFileName(recordingUrl: string, contentType: string | null):
   return 'recording.audio'
 }
 
-function formatTranscriptFromHistory(history: unknown): string {
-  if (!Array.isArray(history)) return ''
-  return history
-    .map((entry) => {
-      if (!isRecord(entry)) return ''
-      const turn = entry as TranscriptTurn
-      const speaker = turn.speaker || turn.role || 'Speaker'
-      const content = turn.content || turn.text || turn.message || ''
-      if (!content || typeof content !== 'string') return ''
-      return `${speaker}: ${content.trim()}`
-    })
-    .filter(Boolean)
-    .join('\n')
-}
 
-async function fetchFreshRecordingUrl(callId: string): Promise<string | null> {
+export async function fetchFreshRecordingUrl(callId: string): Promise<string | null> {
   try {
     const { getIndusLabsAccessToken } = await import('@/lib/aiAgentsUtils')
     const accessToken = await getIndusLabsAccessToken()
@@ -239,7 +219,7 @@ async function fetchFreshRecordingUrl(callId: string): Promise<string | null> {
   }
 }
 
-async function transcribeRecording(recordingUrl: string): Promise<WhisperTranscriptResult> {
+export async function transcribeRecording(recordingUrl: string): Promise<WhisperTranscriptResult> {
   const openAiApiKey = process.env.OPENAI_API_KEY
   if (!openAiApiKey) throw new Error('OPENAI_API_KEY is not configured')
 
@@ -414,18 +394,23 @@ async function runEvaluationPipeline(context: EvaluationPipelineContext): Promis
 
     const transcriptRecord = getFirstRelationRecord(call.c2c_transcripts)
     const history = Array.isArray(transcriptRecord?.history) ? transcriptRecord.history : []
-    const formattedHistoryTranscript = formatTranscriptFromHistory(history)
-    const existingRawText = asString(transcriptRecord?.raw_text, '')
 
     let transcriptText: string
     let rawTranscriptionText: string
 
-    if (formattedHistoryTranscript) {
-      transcriptText = formattedHistoryTranscript
-      rawTranscriptionText = existingRawText || formattedHistoryTranscript
-    } else if (existingRawText) {
-      transcriptText = existingRawText
-      rawTranscriptionText = existingRawText
+    // Check if we already have a Whisper transcript cached in the evaluation record
+    const { data: existingEval } = await client
+      .from('c2c_evaluations')
+      .select('transcript_text, analysis_json')
+      .eq('call_id', context.callId)
+      .maybeSingle()
+
+    const isWhisperGenerated = (existingEval?.analysis_json as Record<string, unknown>)?.whisper_generated === true
+    const existingWhisperTranscript = isWhisperGenerated && existingEval?.transcript_text ? existingEval.transcript_text : null
+
+    if (existingWhisperTranscript) {
+      transcriptText = existingWhisperTranscript
+      rawTranscriptionText = existingWhisperTranscript
     } else {
       let recordingUrl = context.recordingUrl
       const freshUrl = await fetchFreshRecordingUrl(context.callId)
@@ -441,11 +426,9 @@ async function runEvaluationPipeline(context: EvaluationPipelineContext): Promis
       const whisper = await transcribeRecording(recordingUrl)
       transcriptText = whisper.text
       rawTranscriptionText = whisper.text
-
-      await client.from('c2c_transcripts').upsert(
-        { call_id: context.callId, raw_text: whisper.text, updated_at: new Date().toISOString() },
-        { onConflict: 'call_id' }
-      )
+      
+      // We explicitly DO NOT save this to c2c_transcripts anymore, so the Calls page
+      // continues to use the existing IndusLabs transcript.
     }
 
     const analysis = await analyzeTranscript({
@@ -457,12 +440,22 @@ async function runEvaluationPipeline(context: EvaluationPipelineContext): Promis
       agentName: call.from_number,
     })
 
+    // Re-read transcript to get the latest history (webhook may have stored it after pipeline started)
+    const { data: latestTranscript } = await client
+      .from('c2c_transcripts')
+      .select('history')
+      .eq('call_id', context.callId)
+      .maybeSingle()
+    const finalHistory = latestTranscript?.history && Array.isArray(latestTranscript.history) && latestTranscript.history.length > 0
+      ? latestTranscript.history
+      : history
+
     await client.from('c2c_transcripts').upsert(
       {
         call_id: context.callId,
         summary: analysis.call_summary,
         call_outcome: analysis.conversation_outcome || analysis.call_outcome,
-        history,
+        history: finalHistory,
         raw_text: rawTranscriptionText,
         updated_at: new Date().toISOString(),
       },
@@ -474,7 +467,7 @@ async function runEvaluationPipeline(context: EvaluationPipelineContext): Promis
     await upsertEvaluationRecord(context.callId, {
       status: 'completed',
       transcript_text: transcriptText,
-      analysis_json: analysis,
+      analysis_json: { ...analysis, whisper_generated: true },
       call_summary: analysis.call_summary,
       customer_intent: analysis.conversation_objective || analysis.customer_intent,
       main_discussion_points: analysis.main_discussion_points,

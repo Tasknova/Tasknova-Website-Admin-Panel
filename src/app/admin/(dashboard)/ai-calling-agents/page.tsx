@@ -6,6 +6,7 @@ import CallsTab from './tabs/CallsTab'
 import EvaluationsTab from './tabs/EvaluationsTab'
 import PromptsTab from './tabs/PromptsTab'
 import SettingsTab from './tabs/SettingsTab'
+import LogsTab from './tabs/LogsTab'
 
 const TABS = [
   { id: 'dashboard', name: 'Dashboard', component: DashboardTab },
@@ -14,6 +15,7 @@ const TABS = [
   { id: 'evaluations', name: 'Evaluations', component: EvaluationsTab },
   { id: 'prompts', name: 'Prompts', component: PromptsTab },
   { id: 'settings', name: 'Settings', component: SettingsTab },
+  { id: 'logs', name: 'Logs', component: LogsTab },
 ]
 
 export default function AICallingAgentsPage() {

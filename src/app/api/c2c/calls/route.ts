@@ -49,6 +49,24 @@ export async function GET(req: NextRequest) {
         .in('call_id', callIds),
     ])
 
+    // Fix missing history from raw_text
+    for (const t of transcriptsResult.data || []) {
+      const h = t.history as unknown[] | null | undefined
+      const r = typeof t.raw_text === 'string' ? t.raw_text.trim() : ''
+      const isJunk = r === '[]' || r === '{}' || r === ''
+      if (h && Array.isArray(h) && h.length > 0) {
+        const first = h[0] as Record<string, unknown> | null | undefined
+        if (first && first.content === '[]') {
+          t.history = []
+          await client.from('c2c_transcripts').update({ history: [], updated_at: new Date().toISOString() }).eq('call_id', t.call_id)
+        }
+      }
+      if ((!h || h.length === 0) && !isJunk && r) {
+        t.history = [{ role: 'Conversation', content: r }]
+        await client.from('c2c_transcripts').update({ history: t.history, updated_at: new Date().toISOString() }).eq('call_id', t.call_id)
+      }
+    }
+
     // Build lookup maps
     const transcriptMap = new Map(
       (transcriptsResult.data || []).map((t) => [t.call_id, t])

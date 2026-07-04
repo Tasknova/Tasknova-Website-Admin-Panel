@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatDateTime } from '@/lib/utils'
+import { formatTranscriptIntoTurns } from '@/lib/transcriptFormatter'
 
 interface TranscriptTurn {
   role?: string
@@ -186,13 +187,6 @@ export default function C2CEvaluationDetailPage() {
   }, [evaluation?.status, fetchEvaluation])
 
   const analysis = useMemo(() => safeAnalysis(evaluation?.analysis_json), [evaluation?.analysis_json])
-
-  const transcriptHistory = useMemo(() => {
-    return evaluation?.c2c_calls?.c2c_transcripts?.[0]?.history || []
-  }, [evaluation])
-
-  const transcriptText =
-    evaluation?.transcript_text || evaluation?.c2c_calls?.c2c_transcripts?.[0]?.raw_text || null
 
   const overallScore = evaluation?.overall_score ?? evaluation?.score
 
@@ -398,7 +392,7 @@ export default function C2CEvaluationDetailPage() {
         <div className="p-6">
           {activeTab === 'overview' && <OverviewTab evaluation={evaluation} analysis={analysis} />}
           {activeTab === 'transcript' && (
-            <TranscriptTab history={transcriptHistory} transcriptText={transcriptText} status={evaluation.status} />
+            <TranscriptTab evaluation={evaluation} />
           )}
           {activeTab === 'analysis' && (
             <AnalysisTab analysis={analysis} communicationAnalysis={communicationAnalysis} />
@@ -586,16 +580,52 @@ function OverviewTab({ evaluation, analysis }: { evaluation: EvaluationDetail; a
   )
 }
 
+
+
+
 function TranscriptTab({
-  history,
-  transcriptText,
-  status,
+  evaluation,
 }: {
-  history: TranscriptTurn[]
-  transcriptText: string | null
-  status: EvaluationDetail['status']
+  evaluation: EvaluationDetail
 }) {
-  if (status === 'processing') {
+  const [whisperTranscript, setWhisperTranscript] = useState<string | null>(null)
+  const [loadingWhisper, setLoadingWhisper] = useState(false)
+  const [whisperError, setWhisperError] = useState<string | null>(null)
+
+  const isWhisperGenerated = (evaluation.analysis_json as Record<string, unknown>)?.whisper_generated === true
+  // Use transcript_text directly if it exists (regardless of whisper_generated flag)
+  // This avoids unnecessary Whisper API calls for evaluations that already have text.
+  const initialText = evaluation.transcript_text || null
+  const needsWhisperFetch = !initialText && !isWhisperGenerated
+
+  useEffect(() => {
+    if (!needsWhisperFetch || !evaluation.call_id || evaluation.status === 'processing') return
+
+    let isMounted = true
+    setLoadingWhisper(true)
+    setWhisperError(null)
+    
+    fetch(`/api/c2c/evaluations/${evaluation.call_id}/whisper`)
+      .then(res => res.json().then(data => ({ status: res.status, data })))
+      .then(({ status, data }) => {
+        if (!isMounted) return
+        if (status !== 200 || data.error) {
+          setWhisperError(data.error || 'Unknown error occurred')
+        } else if (data.transcript) {
+          setWhisperTranscript(data.transcript)
+        }
+      })
+      .catch(err => {
+        if (isMounted) setWhisperError(err.message)
+      })
+      .finally(() => {
+        if (isMounted) setLoadingWhisper(false)
+      })
+
+    return () => { isMounted = false }
+  }, [evaluation.call_id, needsWhisperFetch, evaluation.status])
+
+  if (evaluation.status === 'processing' || loadingWhisper) {
     return (
       <div className="flex flex-col items-center gap-3 py-12 text-center">
         <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
@@ -604,41 +634,42 @@ function TranscriptTab({
     )
   }
 
-  if (history.length > 0) {
+  if (whisperError) {
     return (
-      <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2">
-        {history.map((turn, idx) => {
-          const speaker = turn.speaker || turn.role || 'Speaker'
-          const content = turn.content || turn.text || turn.message || ''
-          const isCaller =
-            speaker.toLowerCase().includes('caller') ||
-            speaker.toLowerCase().includes('user') ||
-            speaker.toLowerCase().includes('from')
-          return (
-            <div key={idx} className={`flex gap-3 ${isCaller ? 'justify-start' : 'justify-end'}`}>
-              <div
-                className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm shadow-sm ${
-                  isCaller
-                    ? 'bg-blue-50 text-blue-900 rounded-bl-sm'
-                    : 'bg-gray-50 text-gray-900 rounded-br-sm'
-                }`}
-              >
-                <span className="mb-1 block text-xs font-semibold opacity-60">
-                  {isCaller ? 'Caller' : 'Receiver'}
-                </span>
-                {content}
-              </div>
-            </div>
-          )
-        })}
+      <div className="flex flex-col items-center gap-3 py-12 text-center text-red-600">
+        <AlertCircle className="h-10 w-10 text-red-400 mb-2" />
+        <p className="text-sm font-medium">Failed to generate transcript</p>
+        <p className="text-xs">{whisperError}</p>
       </div>
     )
   }
 
-  if (transcriptText) {
+  const displayText = initialText || whisperTranscript
+
+  if (displayText) {
+    const formattedTurns = formatTranscriptIntoTurns(displayText)
+    if (formattedTurns.length > 0) {
+      return (
+        <div className="rounded-xl border border-gray-200 bg-white p-6 max-h-[600px] overflow-y-auto">
+          <div className="space-y-4">
+            {formattedTurns.map((turn, idx) => {
+              const isSpk0 = turn.speaker === 0
+              const label = isSpk0 ? 'Caller' : 'Receiver'
+              return (
+                <p key={idx} className="whitespace-pre-wrap text-sm leading-7 text-gray-700">
+                  <span className="font-semibold text-gray-900">{label}:</span> {turn.lines.join(' ')}
+                </p>
+              )
+            })}
+          </div>
+        </div>
+      )
+    }
+
+    // Fallback: render as plain text if formatter returns nothing
     return (
-      <div className="bg-gray-50 rounded-xl p-4 max-h-[600px] overflow-y-auto">
-        <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans leading-7">{transcriptText}</pre>
+      <div className="rounded-xl bg-gray-50 p-4 max-h-[600px] overflow-y-auto">
+        <p className="text-sm leading-relaxed text-gray-700">{displayText}</p>
       </div>
     )
   }
@@ -646,7 +677,7 @@ function TranscriptTab({
   return (
     <div className="flex flex-col items-center gap-3 py-12 text-center">
       <MessageSquare className="h-10 w-10 text-gray-300" />
-      <p className="text-gray-500 text-sm">No transcript available for this call.</p>
+      <p className="text-sm text-gray-500">No transcript available for this call.</p>
     </div>
   )
 }

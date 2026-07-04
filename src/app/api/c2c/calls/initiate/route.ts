@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@/lib/supabase'
-import { getIndusLabsAccessToken } from '@/lib/aiAgentsUtils'
+import { getIndusLabsAccessToken, parseIndusLabsCallError, resolveAiCallingCallbackUrl } from '@/lib/aiAgentsUtils'
 import { triggerEvaluationPipeline } from '@/lib/c2cEvaluation'
 
 export const dynamic = 'force-dynamic'
@@ -42,16 +42,7 @@ export async function POST(req: NextRequest) {
 
     const client = createServerClient()
 
-    // Get callback URL from settings (same as AI Calling Agents)
-    const { data: callbackSetting } = await client
-      .from('ai_settings')
-      .select('setting_value')
-      .eq('setting_key', 'callback_url')
-      .single()
-
-    const callback_url =
-      callbackSetting?.setting_value ||
-      'https://admin.tasknova.io/api/webhooks/ai-agents/indus'
+    const callback_url = await resolveAiCallingCallbackUrl()
 
     // Get access token
     const accessToken = await getIndusLabsAccessToken()
@@ -93,7 +84,7 @@ export async function POST(req: NextRequest) {
       const errorBody = await response.text()
       console.error('[C2C] IndusLabs error:', response.status, errorBody)
       return NextResponse.json(
-        { error: `IndusLabs API error: ${response.status} - ${errorBody}` },
+        { error: parseIndusLabsCallError(response.status, errorBody) },
         { status: response.status }
       )
     }
@@ -182,21 +173,8 @@ async function pollTranscriptInBackground(
       )
 
       if (transcriptResponse.ok) {
-        const transcriptPayload = (await transcriptResponse.json()) as {
-          data?: {
-            transcript_status?: string
-            duration?: string | number | null
-            recording?: string | null
-            transcript?: {
-              summary?: string | null
-              call_outcome?: string | null
-              transcript_id?: string | null
-              history?: unknown[]
-              createdAt?: string
-            } | null
-            error?: string | null
-          }
-        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const transcriptPayload = (await transcriptResponse.json()) as any
 
         const transcriptStatus = transcriptPayload.data?.transcript_status
         const durationRaw = transcriptPayload.data?.duration
@@ -204,10 +182,37 @@ async function pollTranscriptInBackground(
         const recordingUrl = transcriptPayload.data?.recording || null
 
         if (transcriptStatus === 'ready') {
-          const summary = transcriptPayload.data?.transcript?.summary || null
-          const callOutcome = transcriptPayload.data?.transcript?.call_outcome || null
-          const transcriptId = transcriptPayload.data?.transcript?.transcript_id || null
-          const history = transcriptPayload.data?.transcript?.history || []
+          const rawTranscript = transcriptPayload.data?.transcript
+          let history: unknown[] = []
+          let rawText = ''
+          let summary: string | null = null
+          let callOutcome: string | null = null
+          let transcriptId: string | null = null
+          let transcriptCreatedAt: string | null = null
+
+          if (rawTranscript && typeof rawTranscript === 'object' && Array.isArray(rawTranscript.utterances)) {
+            const utterances = rawTranscript.utterances as Array<Record<string, unknown>>
+            const fullText = typeof rawTranscript.transcript === 'string' ? rawTranscript.transcript : ''
+            if (utterances.length > 0) {
+              history = utterances.map((u: Record<string, unknown>) => ({
+                role: `Speaker ${u.speaker ?? '?'}`,
+                content: u.transcript ?? '',
+              }))
+              rawText = fullText || utterances.map((u: Record<string, unknown>) => u.transcript).filter(Boolean).join(' ')
+            } else if (fullText) {
+              rawText = fullText
+            }
+          } else if (rawTranscript) {
+            history = (rawTranscript as { history?: unknown[] }).history || []
+            summary = (rawTranscript as { summary?: string | null }).summary || null
+            callOutcome = (rawTranscript as { call_outcome?: string | null }).call_outcome || null
+            transcriptId = (rawTranscript as { transcript_id?: string | null }).transcript_id || null
+            transcriptCreatedAt = (rawTranscript as { createdAt?: string | null }).createdAt || null
+          }
+
+          if (history.length === 0 && rawText) {
+            history = [{ role: 'Conversation', content: rawText }]
+          }
 
           await client
             .from('c2c_transcripts')
@@ -217,24 +222,29 @@ async function pollTranscriptInBackground(
               summary,
               call_outcome: callOutcome,
               history,
+              raw_text: rawText || undefined,
             })
 
-          const transcriptCreatedAt = transcriptPayload.data?.transcript?.createdAt || null
+          const hasTranscriptContent = history.length > 0 || rawText.length > 0
+
+          const updateData: Record<string, unknown> = {
+            transcript_status: hasTranscriptContent ? 'completed' : 'pending',
+            duration: duration ?? 0,
+            recording_url: recordingUrl,
+            updated_at: new Date().toISOString(),
+          }
+          if (hasTranscriptContent) {
+            updateData.status = 'completed'
+            updateData.outcome = callOutcome
+            updateData.ended_at = transcriptCreatedAt || new Date().toISOString()
+          }
 
           await client
             .from('c2c_calls')
-            .update({
-              transcript_status: 'completed',
-              duration: duration ?? 0,
-              recording_url: recordingUrl,
-              outcome: callOutcome,
-              status: 'completed',
-              ended_at: transcriptCreatedAt || new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            })
+            .update(updateData)
             .eq('call_id', call_id)
 
-          if (recordingUrl) {
+          if (recordingUrl && hasTranscriptContent) {
             await triggerEvaluationPipeline({
               callId: call_id,
               recordingUrl,
