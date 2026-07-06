@@ -53,6 +53,23 @@ function parseTranscriptPayload(transcript: unknown): unknown[] {
   return []
 }
 
+function parsePowerShellUtterance(str: unknown): Record<string, string> | null {
+  if (typeof str !== 'string') return null
+  const match = str.match(/^@\{(.+)\}$/)
+  if (!match) return null
+  const pairs = match[1].split('; ')
+  const result: Record<string, string> = {}
+  for (const pair of pairs) {
+    const eqIdx = pair.indexOf('=')
+    if (eqIdx > 0) {
+      const key = pair.substring(0, eqIdx).trim()
+      const value = pair.substring(eqIdx + 1).trim()
+      result[key] = value
+    }
+  }
+  return result
+}
+
 export async function POST(req: NextRequest) {
   try {
     const client = createServerClient()
@@ -217,13 +234,14 @@ async function handleTranscriptReady(
       .eq('call_id', call_id)
 
     const transcriptData = parseTranscriptPayload(transcript)
+    const aiRawText = typeof transcript === 'string' && transcript.trim() ? transcript.trim() : ''
     await client.from('ai_transcripts').upsert(
       {
         call_id,
         summary,
         call_outcome: outcome,
         history: transcriptData,
-        raw_text: typeof transcript === 'string' ? transcript : JSON.stringify(transcriptData),
+        raw_text: aiRawText,
       },
       { onConflict: 'call_id' }
     )
@@ -241,7 +259,56 @@ async function handleTranscriptReady(
     .single()
 
   if (c2cCallRecord) {
-    const transcriptData = parseTranscriptPayload(transcript)
+    let transcriptHistory: unknown[] = []
+    let rawText = ''
+
+    const tx = transcript as Record<string, unknown> | null | undefined
+
+    if (tx && typeof tx === 'object' && Array.isArray(tx.utterances)) {
+      const utterances = tx.utterances as Array<unknown>
+      const fullText = typeof tx.transcript === 'string' ? tx.transcript : ''
+      if (utterances.length > 0) {
+        const parsed = utterances
+          .map((u) => {
+            if (typeof u === 'string' && u.startsWith('@{')) {
+              return parsePowerShellUtterance(u)
+            }
+            if (typeof u === 'object' && u) {
+              return u as Record<string, unknown>
+            }
+            return null
+          })
+          .filter(Boolean) as Array<Record<string, string>>
+        if (parsed.length > 0) {
+          const uniqueSpeakers = [...new Set(parsed.map((u) => u.speaker))]
+          transcriptHistory = parsed.map((u, i) => {
+            let label = ''
+            if (uniqueSpeakers.length < 2) {
+              label = i % 2 === 0 ? 'Speaker 0' : 'Speaker 1'
+            } else {
+              label = u.speaker === 'SPEAKER_0' ? 'Speaker 0' : 'Speaker 1'
+            }
+            return { role: label, content: u.transcript ?? '' }
+          })
+          rawText = fullText || parsed.map((u) => u.transcript).filter(Boolean).join(' ')
+        } else if (fullText) {
+          rawText = fullText
+        }
+      } else if (fullText) {
+        rawText = fullText
+      }
+    } else {
+      const parsed = parseTranscriptPayload(transcript)
+      transcriptHistory = parsed
+      if (typeof transcript === 'string' && transcript.trim()) {
+        rawText = transcript.trim()
+      }
+    }
+
+    const hasRealContent = rawText && rawText !== '[]' && rawText !== '{}'
+    if (transcriptHistory.length === 0 && hasRealContent) {
+      transcriptHistory = [{ role: 'Conversation', content: rawText }]
+    }
 
     await client
       .from('c2c_calls')
@@ -253,8 +320,8 @@ async function handleTranscriptReady(
         call_id,
         summary,
         call_outcome: outcome,
-        history: transcriptData,
-        raw_text: typeof transcript === 'string' ? transcript : JSON.stringify(transcriptData),
+        history: transcriptHistory,
+        raw_text: rawText,
       },
       { onConflict: 'call_id' }
     )

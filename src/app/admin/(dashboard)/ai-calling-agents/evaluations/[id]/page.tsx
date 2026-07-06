@@ -8,6 +8,7 @@ import toast from 'react-hot-toast'
 import { AICallEvaluation } from '@/types'
 import { formatDateTime } from '@/lib/utils'
 import { useAiCallingRealtime } from '@/hooks/useAiCallingRealtime'
+import { formatTranscriptIntoTurns } from '@/lib/transcriptFormatter'
 
 interface EvaluationDetail extends AICallEvaluation {
   ai_calls?: {
@@ -260,7 +261,30 @@ export default function EvaluationDetailPage() {
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.7fr_1fr]">
         <div className="space-y-6">
           <SectionCard title="Transcript">
-            <p className="whitespace-pre-wrap text-sm leading-7 text-gray-700">{transcriptText}</p>
+            {(() => {
+              const formattedTurns = formatTranscriptIntoTurns(transcriptText)
+              if (formattedTurns.length > 0) {
+                return (
+                  <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
+                    {formattedTurns.map((turn, idx) => {
+                      const isSpk0 = turn.speaker === 0
+                      const label = isSpk0 ? 'Assistant' : 'User'
+                      return (
+                        <p key={idx} className="whitespace-pre-wrap text-sm leading-7 text-gray-700">
+                          <span className="font-semibold text-gray-900">{label}:</span> {turn.lines.join(' ')}
+                        </p>
+                      )
+                    })}
+                  </div>
+                )
+              }
+              // Fallback
+              return (
+                <div className="max-h-[600px] overflow-y-auto pr-2">
+                  <p className="whitespace-pre-wrap text-sm leading-7 text-gray-700">{transcriptText}</p>
+                </div>
+              )
+            })()}
           </SectionCard>
 
           <SectionCard title="AI Evaluation">

@@ -293,6 +293,7 @@ export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
               >
                 <option value="">-- Select DID --</option>
                 <option value="919484956750">919484956750 (Default)</option>
+                <option value="919429390246">919429390246</option>
               </select>
             </div>
           </div>
@@ -370,7 +371,7 @@ export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">To</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Status</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Duration</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Transcript</th>
+
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Score</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Created</th>
                   <th />
@@ -390,7 +391,7 @@ export default function CallsTab({ isActive = true }: { isActive?: boolean }) {
                       <td className="px-6 py-4 text-sm text-gray-600">{call.to_number}</td>
                       <td className="px-6 py-4"><StatusBadge status={call.status} /></td>
                       <td className="px-6 py-4 text-sm text-gray-600">{formatDuration(getActualDuration(call))}</td>
-                      <td className="px-6 py-4"><TranscriptBadge status={call.transcript_status} /></td>
+
                       <td className="px-6 py-4">
                         <ScoreBadge
                           score={evaluation?.overall_score ?? evaluation?.score ?? null}
@@ -523,25 +524,63 @@ function CallDetail({ call: initialCall, onBack, onRetry }: { call: C2CCall; onB
                   </div>
                 )}
                 {transcript.history && transcript.history.length > 0 ? (
-                  <div className="space-y-2 max-h-80 overflow-y-auto">
-                    {transcript.history.map((turn, idx) => {
-                      const speaker = turn.speaker || turn.role || 'Speaker'
-                      const content = turn.content || turn.text || turn.message || ''
-                      const isUser = speaker.toLowerCase().includes('user') || speaker.toLowerCase().includes('customer')
+                  (() => {
+                    const hasSpeakers = transcript.history.some((t) => {
+                      const l = (t.role || t.speaker || '').toLowerCase()
+                      return l.includes('speaker 0') || l.includes('speaker 1')
+                    })
+                    if (hasSpeakers) {
                       return (
-                        <div key={idx} className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
-                          <div className={`max-w-sm px-4 py-2 rounded-xl text-sm ${isUser ? 'bg-blue-100 text-blue-900' : 'bg-gray-100 text-gray-900'}`}>
-                            <span className="text-xs font-semibold opacity-60 block mb-0.5">{speaker}</span>
-                            {content}
-                          </div>
+                        <div className="space-y-2 max-h-80 overflow-y-auto">
+                          {transcript.history.map((turn, idx) => {
+                            const content = turn.content || turn.text || turn.message || ''
+                            const isSpk0 = (turn.role || turn.speaker || '').toLowerCase().includes('speaker 0')
+                            const label = isSpk0 ? 'Caller' : 'Receiver'
+                            return (
+                              <div key={idx} className={`flex gap-3 ${isSpk0 ? 'justify-start' : 'justify-end'}`}>
+                                <div className={`max-w-sm px-4 py-2 rounded-xl text-sm ${isSpk0 ? 'bg-blue-100 text-blue-900' : 'bg-gray-100 text-gray-900'}`}>
+                                  <span className="text-xs font-semibold opacity-60 block mb-0.5">{label}</span>
+                                  {content}
+                                </div>
+                              </div>
+                            )
+                          })}
                         </div>
                       )
-                    })}
-                  </div>
+                    }
+                    const text = transcript.raw_text || transcript.history[0]?.content || ''
+                    const sentences = text.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean)
+                    return (
+                      <div className="bg-gray-50 rounded-lg p-4 max-h-80 overflow-y-auto">
+                        {sentences.length > 1 ? (
+                          <div className="space-y-2">
+                            {sentences.map((s, i) => (
+                              <p key={i} className="text-xs text-gray-700 leading-relaxed">{s}</p>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-gray-700 leading-relaxed">{text}</p>
+                        )}
+                      </div>
+                    )
+                  })()
                 ) : transcript.raw_text ? (
-                  <div className="bg-gray-50 rounded-lg p-4 max-h-80 overflow-y-auto">
-                    <pre className="text-xs text-gray-700 whitespace-pre-wrap font-sans">{transcript.raw_text}</pre>
-                  </div>
+                  (() => {
+                    const sentences = transcript.raw_text.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean)
+                    return (
+                      <div className="bg-gray-50 rounded-lg p-4 max-h-80 overflow-y-auto">
+                        {sentences.length > 1 ? (
+                          <div className="space-y-2">
+                            {sentences.map((s, i) => (
+                              <p key={i} className="text-xs text-gray-700 leading-relaxed">{s}</p>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-gray-700 leading-relaxed">{transcript.raw_text}</p>
+                        )}
+                      </div>
+                    )
+                  })()
                 ) : null}
               </div>
             ) : (

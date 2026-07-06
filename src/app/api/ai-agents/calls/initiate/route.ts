@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@/lib/supabase'
-import { getIndusLabsAccessToken, logAuditEvent } from '@/lib/aiAgentsUtils'
+import {
+  getIndusLabsAccessToken,
+  isShriramPFAAgent,
+  logAuditEvent,
+  parseIndusLabsCallError,
+  resolveAiCallingCallbackUrl,
+  SHRIRAM_PFA_DEFAULT_DID,
+} from '@/lib/aiAgentsUtils'
 import { triggerEvaluationPipeline } from '@/lib/aiCallingEvaluation'
 
 interface InitiateCallRequest {
@@ -55,9 +62,30 @@ export async function POST(req: NextRequest) {
 
     // Use agent_id as agent_number for the API call
     const agent_number = agent_id
+    const isShriramPFA = isShriramPFAAgent(agent.name)
 
-    // Resolve DID: use provided value, or fall back to most recently used DID for this agent
+    if (isShriramPFA && !agent_config?.customer_name?.trim()) {
+      return NextResponse.json(
+        { error: 'Customer name is required for Shriram PFA agent calls.' },
+        { status: 400 }
+      )
+    }
+
+    // Resolve DID: body → last successful call → last any call → Shriram PFA default
     let did = didFromBody?.trim() || ''
+    if (!did) {
+      const { data: lastSuccessCall } = await client
+        .from('ai_calls')
+        .select('did')
+        .eq('agent_id', agent_id)
+        .eq('status', 'completed')
+        .not('did', 'is', null)
+        .neq('did', '')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+      did = lastSuccessCall?.did || ''
+    }
     if (!did) {
       const { data: lastCall } = await client
         .from('ai_calls')
@@ -71,6 +99,10 @@ export async function POST(req: NextRequest) {
       did = lastCall?.did || ''
     }
 
+    if (!did && isShriramPFA) {
+      did = SHRIRAM_PFA_DEFAULT_DID
+    }
+
     if (!did) {
       return NextResponse.json(
         { error: 'Organization DID is required. No previous DID found for this agent.' },
@@ -78,21 +110,13 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Get callback URL from settings
-    const { data: callbackSetting } = await client
-      .from('ai_settings')
-      .select('setting_value')
-      .eq('setting_key', 'callback_url')
-      .single()
+    const callback_url = await resolveAiCallingCallbackUrl()
 
-    const callback_url =
-      callbackSetting?.setting_value || 'https://admin.tasknova.io/api/webhooks/ai-agents/indus'
-
-    // Get access token
-    const accessToken = await getIndusLabsAccessToken()
+    // Force refresh the token on every call initiation to avoid stale token issues
+    const accessToken = await getIndusLabsAccessToken(true)
     if (!accessToken) {
       return NextResponse.json(
-        { error: 'Failed to authenticate with IndusLabs' },
+        { error: 'Failed to authenticate with IndusLabs. Check INDUSLABS_EMAIL and INDUSLABS_PASSWORD in .env.local'},
         { status: 500 }
       )
     }
@@ -146,8 +170,9 @@ export async function POST(req: NextRequest) {
     if (!response.ok) {
       const errorBody = await response.text()
       console.error('IndusLabs Click2Call failed:', response.status, errorBody)
+      const friendlyError = parseIndusLabsCallError(response.status, errorBody)
       return NextResponse.json(
-        { error: `IndusLabs API error: ${response.status} - ${errorBody}` },
+        { error: friendlyError },
         { status: response.status }
       )
     }
@@ -171,6 +196,9 @@ export async function POST(req: NextRequest) {
 
     const call_id = callData.data?.call_id
     const callStatus = callData.data?.status
+    const callWarning = callData.data?.warning as string | null | undefined
+    const topLevelError = callData.error as string | null | undefined
+    const topLevelMessage = callData.message as string | null | undefined
 
     if (!call_id) {
       return NextResponse.json(
@@ -185,8 +213,15 @@ export async function POST(req: NextRequest) {
         ? 'failed'
         : 'pending'
 
+    const failureReason =
+      callWarning ||
+      topLevelError ||
+      (normalizedCallStatus === 'failed'
+        ? 'IndusLabs could not connect the call. Your phone line may have reached its concurrent call channel limit — wait a few minutes and retry, or contact IndusLabs support.'
+        : null)
+
     // Store call in database immediately so the Calls page can show it right away
-    const { error: insertError } = await client.from('ai_calls').insert({
+    const callRecord = {
       call_id,
       agent_id,
       customer_number: normalizedCustomerNumber,
@@ -195,9 +230,20 @@ export async function POST(req: NextRequest) {
       status: normalizedCallStatus,
       call_type: normalizedCallStatus === 'failed' ? 'failed' : 'unknown',
       transcript_status: transcript ? 'pending' : 'pending',
-      agent_config: agent_config || null,
       started_at: new Date().toISOString(),
-    })
+    }
+
+    let insertError = (
+      await client.from('ai_calls').insert({
+        ...callRecord,
+        agent_config: agent_config || null,
+      })
+    ).error
+
+    // Retry without agent_config if the column hasn't been migrated yet
+    if (insertError?.message?.includes('agent_config')) {
+      insertError = (await client.from('ai_calls').insert(callRecord)).error
+    }
 
     if (insertError) {
       console.error('Failed to store call:', insertError)
@@ -216,12 +262,15 @@ export async function POST(req: NextRequest) {
 
     // Return immediately with call_id and status
     const jsonResponse = NextResponse.json({
-      success: true,
+      success: normalizedCallStatus !== 'failed',
       call_id,
       call_status: normalizedCallStatus,
+      failure_reason: failureReason,
       message: normalizedCallStatus === 'in_progress'
         ? 'Call initiated successfully'
-        : `Call initiation status: ${normalizedCallStatus}`,
+        : normalizedCallStatus === 'failed'
+          ? failureReason || 'Call initiation failed'
+          : topLevelMessage || `Call initiation status: ${normalizedCallStatus}`,
     })
 
     // Start transcript polling in background (fire and forget)

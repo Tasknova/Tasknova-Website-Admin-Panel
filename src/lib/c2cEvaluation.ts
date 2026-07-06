@@ -2,13 +2,7 @@ import { createServerClient } from '@/lib/supabase'
 
 type JsonObject = Record<string, unknown>
 
-interface TranscriptTurn {
-  role?: string
-  speaker?: string
-  content?: string
-  text?: string
-  message?: string
-}
+
 
 interface WhisperTranscriptResult {
   text: string
@@ -21,12 +15,29 @@ interface PerformanceDimension {
   feedback: string
 }
 
+interface ScoreDetail {
+  score: number
+  explanation: string
+}
+
 interface EvaluationScores {
   overall_call_score: number
   agent_performance_score: number
   customer_engagement_score: number
   communication_score: number
   qualification_score: number
+}
+
+interface C2CEvaluationScores {
+  overall_conversation_score: number
+  communication_score: number
+  listening_score: number
+  clarity_score: number
+  conversation_flow_score: number
+  engagement_score: number
+  professionalism_score: number
+  confidence_score: number
+  resolution_effectiveness_score: number
 }
 
 interface EvaluationAnalysis {
@@ -40,6 +51,14 @@ interface EvaluationAnalysis {
   next_best_actions: string[]
   scores: EvaluationScores
   overall_feedback: string
+  conversation_objective: string
+  conversation_outcome: string
+  key_insights: string[]
+  communication_highlights: string[]
+  important_decisions: string[]
+  action_items: string[]
+  communication_analysis: Record<string, ScoreDetail>
+  c2c_scores: C2CEvaluationScores
 }
 
 interface EvaluationPipelineContext {
@@ -77,7 +96,7 @@ function normalizePerformanceDimension(value: unknown): PerformanceDimension {
   if (!isRecord(value)) return { score: 0, feedback: '' }
   return {
     score: clampScore(value.score),
-    feedback: asString(value.feedback),
+    feedback: asString(value.feedback || value.explanation),
   }
 }
 
@@ -91,39 +110,78 @@ function parseJsonObject(raw: string): JsonObject {
   throw new Error('OpenAI response was not a JSON object')
 }
 
+function normalizeScoreDetail(value: unknown): ScoreDetail {
+  if (!isRecord(value)) return { score: 0, explanation: '' }
+  return {
+    score: clampScore(value.score || value.value),
+    explanation: asString(value.explanation || value.feedback || ''),
+  }
+}
+
 function normalizeAnalysis(raw: JsonObject): EvaluationAnalysis {
   const scores = isRecord(raw.scores) ? raw.scores : {}
   const agentPerformance = isRecord(raw.agent_performance) ? raw.agent_performance : {}
+  const communicationAnalysis = isRecord(raw.communication_analysis) ? raw.communication_analysis : {}
+  const c2cScores = isRecord(raw.c2c_scores) ? raw.c2c_scores : {}
 
   return {
     call_summary: asString(raw.call_summary),
-    customer_intent: asString(raw.customer_intent),
+    customer_intent: asString(raw.conversation_objective || raw.customer_intent),
     main_discussion_points: asStringArray(raw.main_discussion_points),
-    call_outcome: asString(raw.call_outcome),
+    call_outcome: asString(raw.conversation_outcome || raw.call_outcome),
     agent_performance: {
-      greeting_quality: normalizePerformanceDimension(agentPerformance.greeting_quality),
+      greeting_quality: normalizePerformanceDimension(agentPerformance.greeting_quality || agentPerformance.tone),
       professionalism: normalizePerformanceDimension(agentPerformance.professionalism),
       tone: normalizePerformanceDimension(agentPerformance.tone),
       clarity: normalizePerformanceDimension(agentPerformance.clarity),
       listening_ability: normalizePerformanceDimension(agentPerformance.listening_ability),
       question_quality: normalizePerformanceDimension(agentPerformance.question_quality),
-      objection_handling: normalizePerformanceDimension(agentPerformance.objection_handling),
-      accuracy: normalizePerformanceDimension(agentPerformance.accuracy),
+      objection_handling: normalizePerformanceDimension(agentPerformance.objection_handling || agentPerformance.resolution_effectiveness),
+      accuracy: normalizePerformanceDimension(agentPerformance.accuracy || agentPerformance.response_quality),
       conversation_flow: normalizePerformanceDimension(agentPerformance.conversation_flow),
       confidence: normalizePerformanceDimension(agentPerformance.confidence),
-      closing_quality: normalizePerformanceDimension(agentPerformance.closing_quality),
+      closing_quality: normalizePerformanceDimension(agentPerformance.closing_quality || agentPerformance.resolution_effectiveness),
     },
     what_went_well: asStringArray(raw.what_went_well),
     areas_for_improvement: asStringArray(raw.areas_for_improvement),
     next_best_actions: asStringArray(raw.next_best_actions),
     scores: {
-      overall_call_score: clampScore(scores.overall_call_score),
-      agent_performance_score: clampScore(scores.agent_performance_score),
-      customer_engagement_score: clampScore(scores.customer_engagement_score),
-      communication_score: clampScore(scores.communication_score),
-      qualification_score: clampScore(scores.qualification_score),
+      overall_call_score: clampScore(c2cScores.overall_conversation_score || scores.overall_call_score),
+      agent_performance_score: clampScore(c2cScores.communication_score || c2cScores.professionalism_score || scores.agent_performance_score),
+      customer_engagement_score: clampScore(c2cScores.engagement_score || scores.customer_engagement_score),
+      communication_score: clampScore(c2cScores.communication_score || c2cScores.clarity_score || scores.communication_score),
+      qualification_score: clampScore(c2cScores.resolution_effectiveness_score || scores.qualification_score),
     },
     overall_feedback: asString(raw.overall_feedback),
+    conversation_objective: asString(raw.conversation_objective || raw.customer_intent),
+    conversation_outcome: asString(raw.conversation_outcome || raw.call_outcome),
+    key_insights: asStringArray(raw.key_insights),
+    communication_highlights: asStringArray(raw.communication_highlights),
+    important_decisions: asStringArray(raw.important_decisions),
+    action_items: asStringArray(raw.action_items),
+    communication_analysis: {
+      tone: normalizeScoreDetail(communicationAnalysis.tone),
+      clarity: normalizeScoreDetail(communicationAnalysis.clarity),
+      listening_ability: normalizeScoreDetail(communicationAnalysis.listening_ability),
+      confidence: normalizeScoreDetail(communicationAnalysis.confidence),
+      conversation_flow: normalizeScoreDetail(communicationAnalysis.conversation_flow),
+      professionalism: normalizeScoreDetail(communicationAnalysis.professionalism),
+      question_quality: normalizeScoreDetail(communicationAnalysis.question_quality),
+      mutual_understanding: normalizeScoreDetail(communicationAnalysis.mutual_understanding),
+      response_quality: normalizeScoreDetail(communicationAnalysis.response_quality || communicationAnalysis.accuracy),
+      resolution_effectiveness: normalizeScoreDetail(communicationAnalysis.resolution_effectiveness || communicationAnalysis.objection_handling),
+    },
+    c2c_scores: {
+      overall_conversation_score: clampScore(c2cScores.overall_conversation_score || scores.overall_call_score),
+      communication_score: clampScore(c2cScores.communication_score || scores.communication_score),
+      listening_score: clampScore(c2cScores.listening_score),
+      clarity_score: clampScore(c2cScores.clarity_score),
+      conversation_flow_score: clampScore(c2cScores.conversation_flow_score),
+      engagement_score: clampScore(c2cScores.engagement_score || scores.customer_engagement_score),
+      professionalism_score: clampScore(c2cScores.professionalism_score),
+      confidence_score: clampScore(c2cScores.confidence_score),
+      resolution_effectiveness_score: clampScore(c2cScores.resolution_effectiveness_score || scores.qualification_score),
+    },
   }
 }
 
@@ -139,22 +197,8 @@ function getRecordingFileName(recordingUrl: string, contentType: string | null):
   return 'recording.audio'
 }
 
-function formatTranscriptFromHistory(history: unknown): string {
-  if (!Array.isArray(history)) return ''
-  return history
-    .map((entry) => {
-      if (!isRecord(entry)) return ''
-      const turn = entry as TranscriptTurn
-      const speaker = turn.speaker || turn.role || 'Speaker'
-      const content = turn.content || turn.text || turn.message || ''
-      if (!content || typeof content !== 'string') return ''
-      return `${speaker}: ${content.trim()}`
-    })
-    .filter(Boolean)
-    .join('\n')
-}
 
-async function fetchFreshRecordingUrl(callId: string): Promise<string | null> {
+export async function fetchFreshRecordingUrl(callId: string): Promise<string | null> {
   try {
     const { getIndusLabsAccessToken } = await import('@/lib/aiAgentsUtils')
     const accessToken = await getIndusLabsAccessToken()
@@ -175,7 +219,7 @@ async function fetchFreshRecordingUrl(callId: string): Promise<string | null> {
   }
 }
 
-async function transcribeRecording(recordingUrl: string): Promise<WhisperTranscriptResult> {
+export async function transcribeRecording(recordingUrl: string): Promise<WhisperTranscriptResult> {
   const openAiApiKey = process.env.OPENAI_API_KEY
   if (!openAiApiKey) throw new Error('OPENAI_API_KEY is not configured')
 
@@ -219,52 +263,62 @@ async function analyzeTranscript(args: {
   if (!openAiApiKey) throw new Error('OPENAI_API_KEY is not configured')
 
   const prompt = [
-    'You are evaluating a human-to-human C2C sales/support call.',
-    'Return ONLY valid JSON.',
-    'Score everything on a 0-100 scale.',
-    'Be concise, evidence-based, and grounded in the transcript.',
+    'You are evaluating a human-to-human C2C (Caller to Receiver) conversation.',
+    'Return ONLY valid JSON. Score everything on a 0-100 scale.',
+    'Be contextual, realistic, and evidence-based. Avoid generic responses.',
+    '',
+    'IMPORTANT: This is NOT an AI agent or sales call.',
+    'Use "Caller" and "Receiver" terminology throughout.',
+    'Never use terms like: agent, customer, sales, lead, qualification.',
     '',
     'Required JSON shape:',
     '{',
-    '  "call_summary": string,',
-    '  "customer_intent": string,',
-    '  "main_discussion_points": string[],',
-    '  "call_outcome": string,',
-    '  "agent_performance": {',
-    '    "greeting_quality": {"score": number, "feedback": string},',
-    '    "professionalism": {"score": number, "feedback": string},',
-    '    "tone": {"score": number, "feedback": string},',
-    '    "clarity": {"score": number, "feedback": string},',
-    '    "listening_ability": {"score": number, "feedback": string},',
-    '    "question_quality": {"score": number, "feedback": string},',
-    '    "objection_handling": {"score": number, "feedback": string},',
-    '    "accuracy": {"score": number, "feedback": string},',
-    '    "conversation_flow": {"score": number, "feedback": string},',
-    '    "confidence": {"score": number, "feedback": string},',
-    '    "closing_quality": {"score": number, "feedback": string}',
+    '  "call_summary": string (2-3 sentence summary of the entire conversation),',
+    '  "conversation_objective": string (what the caller was trying to accomplish),',
+    '  "conversation_outcome": string (what was achieved or not achieved),',
+    '  "main_discussion_points": string[] (key topics discussed, 3-6 items),',
+    '  "what_went_well": string[] (specific positive aspects, 2-4 items),',
+    '  "areas_for_improvement": string[] (specific areas needing improvement, 2-4 items),',
+    '  "next_best_actions": string[] (recommended follow-up steps, 2-3 items),',
+    '  "overall_feedback": string (1-2 paragraph holistic assessment),',
+    '  "key_insights": string[] (notable observations about the interaction, 2-4 items),',
+    '  "communication_highlights": string[] (exceptional moments in the conversation, 1-3 items),',
+    '  "important_decisions": string[] (any decisions made during the call, 0-3 items),',
+    '  "action_items": string[] (specific tasks assigned, leave empty if none),',
+    '  "communication_analysis": {',
+    '    "tone": {"score": number, "explanation": string},',
+    '    "clarity": {"score": number, "explanation": string},',
+    '    "listening_ability": {"score": number, "explanation": string},',
+    '    "confidence": {"score": number, "explanation": string},',
+    '    "conversation_flow": {"score": number, "explanation": string},',
+    '    "professionalism": {"score": number, "explanation": string},',
+    '    "question_quality": {"score": number, "explanation": string},',
+    '    "mutual_understanding": {"score": number, "explanation": string},',
+    '    "response_quality": {"score": number, "explanation": string},',
+    '    "resolution_effectiveness": {"score": number, "explanation": string}',
     '  },',
-    '  "what_went_well": string[],',
-    '  "areas_for_improvement": string[],',
-    '  "next_best_actions": string[],',
-    '  "scores": {',
-    '    "overall_call_score": number,',
-    '    "agent_performance_score": number,',
-    '    "customer_engagement_score": number,',
+    '  "c2c_scores": {',
+    '    "overall_conversation_score": number,',
     '    "communication_score": number,',
-    '    "qualification_score": number',
-    '  },',
-    '  "overall_feedback": string',
+    '    "listening_score": number,',
+    '    "clarity_score": number,',
+    '    "conversation_flow_score": number,',
+    '    "engagement_score": number,',
+    '    "professionalism_score": number,',
+    '    "confidence_score": number,',
+    '    "resolution_effectiveness_score": number',
+    '  }',
     '}',
     '',
-    `Agent (From Number): ${args.agentName || 'Unknown'}`,
-    `Customer (To Number): ${args.customerNumber || 'Unknown'}`,
+    `Caller (From Number): ${args.agentName || 'Unknown'}`,
+    `Receiver (To Number): ${args.customerNumber || 'Unknown'}`,
     `Call duration in seconds: ${args.duration ?? 'Unknown'}`,
     `Existing outcome if any: ${args.existingOutcome || 'Unknown'}`,
     '',
     'Conversation transcript:',
     args.transcriptText,
     '',
-    'Raw Whisper transcription:',
+    'Raw transcription:',
     args.rawTranscription,
   ].join('\n')
 
@@ -275,7 +329,13 @@ async function analyzeTranscript(args: {
       model: 'gpt-4o-mini',
       temperature: 0.2,
       response_format: { type: 'json_object' },
-      messages: [{ role: 'system', content: 'You produce strict JSON evaluations for calling transcripts.' }, { role: 'user', content: prompt }],
+      messages: [
+        {
+          role: 'system',
+          content: 'You produce strict JSON evaluations for C2C (human-to-human) call transcripts. Use Caller/Receiver terminology. Never use agent, customer, sales, lead, or qualification.',
+        },
+        { role: 'user', content: prompt },
+      ],
     }),
   })
 
@@ -312,7 +372,6 @@ export async function triggerEvaluationPipeline(context: EvaluationPipelineConte
   void runEvaluationPipeline(context).catch(async (error) => {
     const errorMessage = error instanceof Error ? error.message : 'Unknown pipeline error'
     console.error('[C2C] Evaluation pipeline failed for', context.callId, ':', errorMessage)
-    // Always mark as failed so it doesn't stay stuck as 'processing'
     await upsertEvaluationRecord(context.callId, {
       status: 'failed',
       error_message: errorMessage,
@@ -335,25 +394,24 @@ async function runEvaluationPipeline(context: EvaluationPipelineContext): Promis
 
     const transcriptRecord = getFirstRelationRecord(call.c2c_transcripts)
     const history = Array.isArray(transcriptRecord?.history) ? transcriptRecord.history : []
-    const formattedHistoryTranscript = formatTranscriptFromHistory(history)
-    const existingRawText = asString(transcriptRecord?.raw_text, '')
 
-    // --- Transcript Strategy ---
-    // If IndusLabs already gave us a conversation history, use it directly.
-    // Only call Whisper if there is NO existing transcript (saves 10-30s per call).
     let transcriptText: string
     let rawTranscriptionText: string
 
-    if (formattedHistoryTranscript) {
-      // Fast path: use the existing structured transcript from IndusLabs
-      transcriptText = formattedHistoryTranscript
-      rawTranscriptionText = existingRawText || formattedHistoryTranscript
-    } else if (existingRawText) {
-      // Medium path: use raw text that was already saved
-      transcriptText = existingRawText
-      rawTranscriptionText = existingRawText
+    // Check if we already have a Whisper transcript cached in the evaluation record
+    const { data: existingEval } = await client
+      .from('c2c_evaluations')
+      .select('transcript_text, analysis_json')
+      .eq('call_id', context.callId)
+      .maybeSingle()
+
+    const isWhisperGenerated = (existingEval?.analysis_json as Record<string, unknown>)?.whisper_generated === true
+    const existingWhisperTranscript = isWhisperGenerated && existingEval?.transcript_text ? existingEval.transcript_text : null
+
+    if (existingWhisperTranscript) {
+      transcriptText = existingWhisperTranscript
+      rawTranscriptionText = existingWhisperTranscript
     } else {
-      // Slow path: no transcript at all — try to fetch recording and Whisper-transcribe
       let recordingUrl = context.recordingUrl
       const freshUrl = await fetchFreshRecordingUrl(context.callId)
       if (freshUrl) {
@@ -368,12 +426,9 @@ async function runEvaluationPipeline(context: EvaluationPipelineContext): Promis
       const whisper = await transcribeRecording(recordingUrl)
       transcriptText = whisper.text
       rawTranscriptionText = whisper.text
-
-      // Persist the whisper text so future re-evaluations are fast
-      await client.from('c2c_transcripts').upsert(
-        { call_id: context.callId, raw_text: whisper.text, updated_at: new Date().toISOString() },
-        { onConflict: 'call_id' }
-      )
+      
+      // We explicitly DO NOT save this to c2c_transcripts anymore, so the Calls page
+      // continues to use the existing IndusLabs transcript.
     }
 
     const analysis = await analyzeTranscript({
@@ -385,39 +440,49 @@ async function runEvaluationPipeline(context: EvaluationPipelineContext): Promis
       agentName: call.from_number,
     })
 
+    // Re-read transcript to get the latest history (webhook may have stored it after pipeline started)
+    const { data: latestTranscript } = await client
+      .from('c2c_transcripts')
+      .select('history')
+      .eq('call_id', context.callId)
+      .maybeSingle()
+    const finalHistory = latestTranscript?.history && Array.isArray(latestTranscript.history) && latestTranscript.history.length > 0
+      ? latestTranscript.history
+      : history
+
     await client.from('c2c_transcripts').upsert(
       {
         call_id: context.callId,
         summary: analysis.call_summary,
-        call_outcome: analysis.call_outcome,
-        history,
+        call_outcome: analysis.conversation_outcome || analysis.call_outcome,
+        history: finalHistory,
         raw_text: rawTranscriptionText,
         updated_at: new Date().toISOString(),
       },
       { onConflict: 'call_id' }
     )
 
-    await client.from('c2c_calls').update({ outcome: analysis.call_outcome, updated_at: new Date().toISOString() }).eq('call_id', context.callId)
+    await client.from('c2c_calls').update({ outcome: analysis.conversation_outcome || analysis.call_outcome, updated_at: new Date().toISOString() }).eq('call_id', context.callId)
 
     await upsertEvaluationRecord(context.callId, {
       status: 'completed',
       transcript_text: transcriptText,
-      analysis_json: analysis,
+      analysis_json: { ...analysis, whisper_generated: true },
       call_summary: analysis.call_summary,
-      customer_intent: analysis.customer_intent,
+      customer_intent: analysis.conversation_objective || analysis.customer_intent,
       main_discussion_points: analysis.main_discussion_points,
-      call_outcome: analysis.call_outcome,
+      call_outcome: analysis.conversation_outcome || analysis.call_outcome,
       agent_performance: analysis.agent_performance,
       strengths: analysis.what_went_well,
       areas_for_improvement: analysis.areas_for_improvement,
       next_best_actions: analysis.next_best_actions,
       overall_feedback: analysis.overall_feedback,
-      overall_score: analysis.scores.overall_call_score,
-      agent_performance_score: analysis.scores.agent_performance_score,
-      customer_engagement_score: analysis.scores.customer_engagement_score,
-      communication_score: analysis.scores.communication_score,
-      qualification_score: analysis.scores.qualification_score,
-      score: analysis.scores.overall_call_score,
+      overall_score: analysis.c2c_scores.overall_conversation_score || analysis.scores.overall_call_score,
+      agent_performance_score: analysis.c2c_scores.communication_score || analysis.c2c_scores.professionalism_score || analysis.scores.agent_performance_score,
+      customer_engagement_score: analysis.c2c_scores.engagement_score || analysis.scores.customer_engagement_score,
+      communication_score: analysis.c2c_scores.communication_score || analysis.c2c_scores.clarity_score || analysis.scores.communication_score,
+      qualification_score: analysis.c2c_scores.resolution_effectiveness_score || analysis.scores.qualification_score,
+      score: analysis.c2c_scores.overall_conversation_score || analysis.scores.overall_call_score,
       issues: analysis.areas_for_improvement,
       suggestions: analysis.next_best_actions,
       error_message: null,

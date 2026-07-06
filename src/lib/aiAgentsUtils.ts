@@ -100,7 +100,7 @@ export async function evaluateCall(input: EvaluationInput): Promise<EvaluationOu
  * Classify a call based on duration and transcript availability
  */
 export function classifyCall(duration: number, hasTranscript: boolean): 'valid' | 'invalid' | 'failed' {
-  if (duration < 10) {
+  if (duration > 0 && duration < 10) {
     return 'invalid'
   }
   if (!hasTranscript) {
@@ -154,19 +154,58 @@ export async function getIndusLabsApiKey(): Promise<string | null> {
  * Get callback URL from settings
  */
 export async function getCallbackUrl(): Promise<string> {
-  const client = createServerClient()
-  
-  try {
-    const { data } = await client
-      .from('ai_settings')
-      .select('setting_value')
-      .eq('setting_key', 'callback_url')
-      .single()
-    
-    return data?.setting_value || 'https://yourdomain.com/webhooks/ai-agents/indus'
-  } catch {
-    return 'https://yourdomain.com/webhooks/ai-agents/indus'
+  return resolveAiCallingCallbackUrl()
+}
+
+/** Normalize webhook URL — ensure /api prefix before /webhooks/ */
+export function normalizeCallbackUrl(url: string): string {
+  const trimmed = url.trim()
+  if (!trimmed) {
+    return 'https://admin.tasknova.io/api/webhooks/ai-agents/indus'
   }
+  if (trimmed.includes('/api/webhooks/')) {
+    return trimmed
+  }
+  return trimmed.replace(/^(https?:\/\/[^/]+)\/webhooks\//, '$1/api/webhooks/')
+}
+
+/** Resolve the IndusLabs webhook callback URL from ai_settings. */
+export async function resolveAiCallingCallbackUrl(): Promise<string> {
+  const client = createServerClient()
+  const fallback = 'https://admin.tasknova.io/api/webhooks/ai-agents/indus'
+
+  try {
+    const { data: settings } = await client
+      .from('ai_settings')
+      .select('setting_key, setting_value')
+      .in('setting_key', ['webhook_callback_url', 'callback_url'])
+
+    const webhookUrl = settings?.find((s) => s.setting_key === 'webhook_callback_url')?.setting_value
+    const callbackUrl = settings?.find((s) => s.setting_key === 'callback_url')?.setting_value
+
+    // Prefer webhook_callback_url; normalize legacy callback_url missing /api
+    const raw = webhookUrl || callbackUrl || fallback
+    return normalizeCallbackUrl(raw)
+  } catch {
+    return fallback
+  }
+}
+
+/** Parse IndusLabs click2call error body into a user-friendly message. */
+export function parseIndusLabsCallError(status: number, errorBody: string): string {
+  let detail = errorBody
+  try {
+    const parsed = JSON.parse(errorBody) as { detail?: string; message?: string; error?: string }
+    detail = parsed.detail || parsed.message || parsed.error || errorBody
+  } catch {
+    // keep raw body
+  }
+
+  if (status === 429 || /channel limit/i.test(detail)) {
+    return `${detail} Wait a few minutes before retrying, or contact IndusLabs to increase your concurrent call channel limit.`
+  }
+
+  return detail
 }
 
 /**
@@ -372,4 +411,16 @@ export async function getIndusLabsAgentVersions(agentId: string): Promise<Record
     console.error('Failed to get agent versions:', error)
     return null
   }
+}
+
+/** Default organization DID for Shriram/Sriram PFA agents (from working production calls). */
+export const SHRIRAM_PFA_DEFAULT_DID = '9763798289'
+
+/**
+ * Detect Shriram/Sriram PFA agents regardless of spelling, spacing, or suffix (e.g. "Agent").
+ */
+export function isShriramPFAAgent(agentName: string | null | undefined): boolean {
+  if (!agentName) return false
+  const normalized = agentName.toLowerCase().replace(/[\s_-]+/g, '')
+  return (normalized.includes('shriram') || normalized.includes('sriram')) && normalized.includes('pfa')
 }

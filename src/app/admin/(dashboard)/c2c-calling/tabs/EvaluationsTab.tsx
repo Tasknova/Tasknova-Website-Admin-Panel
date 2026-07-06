@@ -1,7 +1,8 @@
 'use client'
+import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
-import { AlertCircle, ChevronRight, Loader2, RefreshCw } from 'lucide-react'
+import { AlertCircle, ExternalLink, Loader2, RefreshCw } from 'lucide-react'
 
 interface TranscriptTurn {
   role?: string
@@ -50,7 +51,6 @@ interface C2CEvaluation {
 export default function EvaluationsTab({ isActive = true }: { isActive?: boolean }) {
   const [evaluations, setEvaluations] = useState<C2CEvaluation[]>([])
   const [loading, setLoading] = useState(true)
-  const [selected, setSelected] = useState<C2CEvaluation | null>(null)
   const [statusFilter, setStatusFilter] = useState('')
   const [reEvaluatingId, setReEvaluatingId] = useState<string | null>(null)
 
@@ -100,15 +100,6 @@ export default function EvaluationsTab({ isActive = true }: { isActive?: boolean
     }
   }
 
-  if (selected) {
-    return (
-      <EvaluationDetail
-        evaluation={selected}
-        onBack={() => setSelected(null)}
-      />
-    )
-  }
-
   return (
     <div className="space-y-4">
       {/* Filters */}
@@ -156,8 +147,15 @@ export default function EvaluationsTab({ isActive = true }: { isActive?: boolean
             </thead>
             <tbody className="divide-y divide-gray-100">
               {evaluations.map((ev) => (
-                <tr key={ev.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setSelected(ev)}>
-                  <td className="px-6 py-4 text-sm font-mono text-gray-900">{ev.call_id.substring(0, 12)}...</td>
+                <tr key={ev.id} className="hover:bg-gray-50 cursor-pointer">
+                  <td className="px-6 py-4">
+                    <Link
+                      href={`/admin/c2c-calling/evaluations/${ev.call_id}`}
+                      className="text-sm font-mono text-blue-600 hover:text-blue-800 hover:underline"
+                    >
+                      {ev.call_id.substring(0, 12)}...
+                    </Link>
+                  </td>
                   <td className="px-6 py-4 text-sm text-gray-600">
                     <div>{ev.c2c_calls?.from_number || '-'}</div>
                     <div className="text-gray-400">→ {ev.c2c_calls?.to_number || '-'}</div>
@@ -166,8 +164,8 @@ export default function EvaluationsTab({ isActive = true }: { isActive?: boolean
                   <td className="px-6 py-4"><ScoreBadge score={ev.overall_score ?? ev.score} status={ev.status} /></td>
                   <td className="px-6 py-4 text-sm text-gray-600 max-w-xs truncate">{ev.call_summary || '-'}</td>
                   <td className="px-6 py-4 text-sm text-gray-500">{new Date(ev.created_at).toLocaleString()}</td>
-                  <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
-                    <div className="flex items-center gap-2">
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                       <button
                         onClick={(e) => handleReevaluate(ev, e)}
                         disabled={reEvaluatingId === ev.call_id || ev.status === 'processing'}
@@ -181,10 +179,13 @@ export default function EvaluationsTab({ isActive = true }: { isActive?: boolean
                         )}
                         Re-evaluate
                       </button>
-                      <ChevronRight
-                        className="w-4 h-4 text-gray-400 cursor-pointer"
-                        onClick={(e) => { e.stopPropagation(); setSelected(ev) }}
-                      />
+                      <Link
+                        href={`/admin/c2c-calling/evaluations/${ev.call_id}`}
+                        className="p-1 hover:bg-gray-100 rounded-lg transition"
+                        title="View details"
+                      >
+                        <ExternalLink className="w-4 h-4 text-gray-400" />
+                      </Link>
                     </div>
                   </td>
                 </tr>
@@ -193,139 +194,6 @@ export default function EvaluationsTab({ isActive = true }: { isActive?: boolean
           </table>
         </div>
       )}
-    </div>
-  )
-}
-
-function EvaluationDetail({
-  evaluation,
-  onBack,
-}: {
-  evaluation: C2CEvaluation
-  onBack: () => void
-}) {
-  const transcript = Array.isArray(evaluation.c2c_calls?.c2c_transcripts)
-    ? evaluation.c2c_calls.c2c_transcripts[0]
-    : null
-  const history = transcript?.history || []
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <button onClick={onBack} className="text-blue-600 hover:text-blue-700 font-medium">← Back to Evaluations</button>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left col: summary + transcript */}
-        <div className="lg:col-span-2 space-y-6">
-          {evaluation.call_summary && (
-            <InfoCard title="Call Summary">
-              <p className="text-sm text-gray-700">{evaluation.call_summary}</p>
-            </InfoCard>
-          )}
-          {evaluation.customer_intent && (
-            <InfoCard title="Customer Intent">
-              <p className="text-sm text-gray-700">{evaluation.customer_intent}</p>
-            </InfoCard>
-          )}
-          {evaluation.main_discussion_points?.length > 0 && (
-            <InfoCard title="Main Discussion Points">
-              <ul className="list-disc list-inside space-y-1">
-                {evaluation.main_discussion_points.map((p, i) => (
-                  <li key={i} className="text-sm text-gray-700">{p}</li>
-                ))}
-              </ul>
-            </InfoCard>
-          )}
-          {evaluation.next_best_actions?.length > 0 && (
-            <InfoCard title="Next Best Actions">
-              <ul className="list-disc list-inside space-y-1">
-                {evaluation.next_best_actions.map((a, i) => (
-                  <li key={i} className="text-sm text-blue-700">{a}</li>
-                ))}
-              </ul>
-            </InfoCard>
-          )}
-
-          {/* Transcript Section */}
-          <InfoCard title="Transcript">
-            {history.length > 0 ? (
-              <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
-                {history.map((turn, idx) => {
-                  const speaker = turn.speaker || turn.role || 'Speaker'
-                  const content = turn.content || turn.text || turn.message || ''
-                  const isUser = speaker.toLowerCase().includes('user') || speaker.toLowerCase().includes('customer')
-                  return (
-                    <div key={idx} className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-sm px-4 py-2 rounded-xl text-sm shadow-sm ${isUser ? 'bg-blue-100 text-blue-900' : 'bg-gray-100 text-gray-900'}`}>
-                        <span className="text-xs font-semibold opacity-60 block mb-0.5">{speaker}</span>
-                        {content}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            ) : evaluation.transcript_text ? (
-              <div className="bg-gray-50 rounded-lg p-4 max-h-80 overflow-y-auto">
-                <pre className="text-xs text-gray-700 whitespace-pre-wrap font-sans">{evaluation.transcript_text}</pre>
-              </div>
-            ) : (
-              <p className="text-sm text-gray-400 text-center py-4">No transcript available for this call.</p>
-            )}
-          </InfoCard>
-        </div>
-
-        {/* Right col: score + strengths + improvements + info */}
-        <div className="space-y-6">
-          <InfoCard title="Score">
-            <div className="text-center">
-              <ScoreBadge score={evaluation.overall_score ?? evaluation.score} status={evaluation.status} />
-            </div>
-            {evaluation.overall_feedback && (
-              <p className="text-sm text-gray-600 mt-3">{evaluation.overall_feedback}</p>
-            )}
-          </InfoCard>
-          {evaluation.strengths?.length > 0 && (
-            <InfoCard title="Strengths">
-              <ul className="space-y-1">
-                {evaluation.strengths.map((s, i) => (
-                  <li key={i} className="text-sm text-green-700 flex gap-2"><span>✓</span>{s}</li>
-                ))}
-              </ul>
-            </InfoCard>
-          )}
-          {evaluation.areas_for_improvement?.length > 0 && (
-            <InfoCard title="Areas for Improvement">
-              <ul className="space-y-1">
-                {evaluation.areas_for_improvement.map((a, i) => (
-                  <li key={i} className="text-sm text-orange-700 flex gap-2"><span>!</span>{a}</li>
-                ))}
-              </ul>
-            </InfoCard>
-          )}
-          {evaluation.error_message && (
-            <InfoCard title="Error">
-              <p className="text-sm text-red-600">{evaluation.error_message}</p>
-            </InfoCard>
-          )}
-          <InfoCard title="Call Info">
-            <div className="space-y-2 text-sm">
-              <p><span className="text-gray-500">From:</span> {evaluation.c2c_calls?.from_number || '-'}</p>
-              <p><span className="text-gray-500">To:</span> {evaluation.c2c_calls?.to_number || '-'}</p>
-              <p><span className="text-gray-500">Date:</span> {new Date(evaluation.created_at).toLocaleString()}</p>
-            </div>
-          </InfoCard>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function InfoCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="bg-white rounded-lg border border-gray-200 p-6">
-      <h3 className="text-sm font-semibold text-gray-700 mb-3">{title}</h3>
-      {children}
     </div>
   )
 }
