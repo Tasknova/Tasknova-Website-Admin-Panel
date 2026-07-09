@@ -41,6 +41,7 @@ interface EvaluationAnalysis {
   next_best_actions: string[]
   scores: EvaluationScores
   overall_feedback: string
+  diarized_transcript?: string
 }
 
 interface EvaluationPipelineContext {
@@ -140,6 +141,7 @@ function normalizeAnalysis(raw: JsonObject): EvaluationAnalysis {
       qualification_score: clampScore(scores.qualification_score),
     },
     overall_feedback: asString(raw.overall_feedback),
+    diarized_transcript: asString(raw.diarized_transcript),
   }
 }
 
@@ -308,7 +310,8 @@ async function analyzeTranscript(args: {
     '    "communication_score": number,',
     '    "qualification_score": number',
     '  },',
-    '  "overall_feedback": string',
+    '  "overall_feedback": string,',
+    '  "diarized_transcript": string // IMPORTANT: Output a formatted string separating speakers with newlines. E.g. "Assistant: Hello\\nUser: Hi"',
     '}',
     '',
     `Agent name: ${args.agentName || 'Unknown'}`,
@@ -456,10 +459,10 @@ async function runEvaluationPipeline(context: EvaluationPipelineContext): Promis
     }
 
     const whisper = await transcribeRecording(recordingUrl)
-    const transcriptText = formattedHistoryTranscript || whisper.text
+    const rawTranscriptText = formattedHistoryTranscript || whisper.text
 
     const analysis = await analyzeTranscript({
-      transcriptText,
+      transcriptText: rawTranscriptText,
       rawTranscription: whisper.text,
       existingOutcome: call.outcome || asString(transcriptRecord?.call_outcome, '') || null,
       duration: typeof call.duration === 'number' ? call.duration : whisper.duration,
@@ -487,9 +490,11 @@ async function runEvaluationPipeline(context: EvaluationPipelineContext): Promis
       })
       .eq('call_id', context.callId)
 
+    const finalTranscriptText = analysis.diarized_transcript || rawTranscriptText
+
     await upsertEvaluationRecord(context.callId, {
       status: 'completed',
-      transcript_text: transcriptText,
+      transcript_text: finalTranscriptText,
       transcript_source: 'whisper-1',
       analysis_json: analysis,
       call_summary: analysis.call_summary,

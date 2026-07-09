@@ -203,22 +203,56 @@ function assignSpeakers(lines: string[]): FormattedTurn[] {
 // Public API
 // ---------------------------------------------------------------------------
 
-/**
- * Formats a plain-text transcript string into a list of structured speaker
- * turns suitable for rendering in the Evaluation Transcript Tab.
- *
- * Handles two input formats:
- * - Newline-separated utterances (one line = one utterance)
- * - Single-paragraph Whisper output (sentences separated by spaces)
- *
- * Returns an empty array if the input is null, undefined, or blank.
- * The original transcript text is NEVER mutated.
- */
 export function formatTranscriptIntoTurns(
   transcriptText: string | null | undefined,
 ): FormattedTurn[] {
   if (!transcriptText || !transcriptText.trim()) return []
-  // Strip any synthetic "Role: " prefix before processing (display-only copy)
+  
+  const rawLines = transcriptText.split('\n').map(l => l.trim()).filter(Boolean)
+  
+  // Check if it's already explicitly diarized (e.g. "Assistant: Hello" and "User: Hi")
+  // We check if at least half the lines have a prefix
+  const prefixRegex = /^([A-Za-z0-9 _]+):\s+(.*)$/i
+  let prefixedCount = 0
+  
+  for (const line of rawLines) {
+    if (prefixRegex.test(line)) prefixedCount++
+  }
+  
+  if (rawLines.length > 0 && prefixedCount >= rawLines.length / 2) {
+    // Explicitly diarized!
+    const turns: FormattedTurn[] = []
+    let currentSpeakerIndex = 0
+    const speakerMap = new Map<string, number>()
+    
+    for (const line of rawLines) {
+      const match = prefixRegex.exec(line)
+      if (match) {
+        const name = match[1].toLowerCase()
+        const content = match[2]
+        
+        if (!speakerMap.has(name)) {
+          speakerMap.set(name, speakerMap.size)
+        }
+        
+        const spkIdx = speakerMap.get(name)!
+        
+        if (spkIdx !== currentSpeakerIndex || turns.length === 0) {
+          currentSpeakerIndex = spkIdx
+          turns.push({ speaker: spkIdx, lines: [content] })
+        } else {
+          turns[turns.length - 1].lines.push(content)
+        }
+      } else {
+        // Line without prefix, just append to current turn
+        if (turns.length > 0) turns[turns.length - 1].lines.push(line)
+        else turns.push({ speaker: 0, lines: [line] })
+      }
+    }
+    return turns
+  }
+
+  // Fallback to legacy formatting logic
   const cleaned = stripRolePrefixes(transcriptText)
   const lines = splitIntoLines(cleaned)
   if (lines.length === 0) return []
