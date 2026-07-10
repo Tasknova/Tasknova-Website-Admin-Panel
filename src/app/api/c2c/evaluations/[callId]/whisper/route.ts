@@ -56,6 +56,43 @@ export async function GET(
     // 3. Transcribe with Whisper
     const whisperResult = await transcribeRecording(recordingUrl)
 
+    // 3.5 Diarize with GPT-4o-mini
+    let finalTranscript = whisperResult.text
+    try {
+      const openAiApiKey = process.env.OPENAI_API_KEY
+      if (openAiApiKey) {
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${openAiApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            temperature: 0.2,
+            messages: [
+              {
+                role: 'system',
+                content: 'You are an expert at diarizing raw call transcripts. Add speaker labels (e.g. Agent: and Customer:) and separate speakers with newlines. Do not change the actual spoken words.',
+              },
+              {
+                role: 'user',
+                content: whisperResult.text,
+              },
+            ],
+          }),
+        })
+        if (response.ok) {
+          const payload = await response.json()
+          if (payload.choices?.[0]?.message?.content) {
+            finalTranscript = payload.choices[0].message.content.trim()
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to diarize transcript:', err)
+    }
+
     // 4. Update the evaluation record
     const updatedAnalysisJson = {
       ...(analysisJson || {}),
@@ -65,7 +102,7 @@ export async function GET(
     const { error: updateError } = await client
       .from('c2c_evaluations')
       .update({
-        transcript_text: whisperResult.text,
+        transcript_text: finalTranscript,
         analysis_json: updatedAnalysisJson,
         updated_at: new Date().toISOString(),
       })
@@ -76,7 +113,7 @@ export async function GET(
     }
 
     // 5. Return the new transcript
-    return NextResponse.json({ transcript: whisperResult.text })
+    return NextResponse.json({ transcript: finalTranscript })
 
   } catch (error) {
     console.error('[C2C Whisper] Error generating transcript:', error)

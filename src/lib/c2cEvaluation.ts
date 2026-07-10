@@ -59,6 +59,7 @@ interface EvaluationAnalysis {
   action_items: string[]
   communication_analysis: Record<string, ScoreDetail>
   c2c_scores: C2CEvaluationScores
+  diarized_transcript?: string
 }
 
 interface EvaluationPipelineContext {
@@ -182,6 +183,7 @@ function normalizeAnalysis(raw: JsonObject): EvaluationAnalysis {
       confidence_score: clampScore(c2cScores.confidence_score),
       resolution_effectiveness_score: clampScore(c2cScores.resolution_effectiveness_score || scores.qualification_score),
     },
+    diarized_transcript: asString(raw.diarized_transcript),
   }
 }
 
@@ -307,7 +309,8 @@ async function analyzeTranscript(args: {
     '    "professionalism_score": number,',
     '    "confidence_score": number,',
     '    "resolution_effectiveness_score": number',
-    '  }',
+    '  },',
+    '  "diarized_transcript": string // IMPORTANT: Output a formatted string separating speakers with newlines. E.g. "Agent: Hello\\nCustomer: Hi"',
     '}',
     '',
     `Caller (From Number): ${args.agentName || 'Unknown'}`,
@@ -466,7 +469,7 @@ async function runEvaluationPipeline(context: EvaluationPipelineContext): Promis
 
     await upsertEvaluationRecord(context.callId, {
       status: 'completed',
-      transcript_text: transcriptText,
+      transcript_text: analysis.diarized_transcript || transcriptText,
       analysis_json: { ...analysis, whisper_generated: true },
       call_summary: analysis.call_summary,
       customer_intent: analysis.conversation_objective || analysis.customer_intent,
